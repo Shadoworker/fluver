@@ -1170,15 +1170,14 @@ class F {
             else { runner.from(finalValue); finalValue = 0; }
             runner.followedPath = followedPath;
             runner.params = { centered: step.params?.centered || false, rotated: step.params?.rotated || false, reversed: step.params?.reversed || false };
-          } else if (prop in F.__EFFECTS) {
+          } 
+          else if (prop in F.__EFFECTS) {
             runner = new Morphable();
             const { effectSelector, filterSelector, filterProperty } = step.params;
             runner.params = step.params;
-
-            const effectEl = document.querySelector(`${effectSelector}`)[0];
-            const propertyHandlerEl = effectEl?.findOne(filterSelector);
+            const effectEl = document.querySelector(`${effectSelector}`);
+            const propertyHandlerEl = effectEl?.querySelector(filterSelector);
             if (propertyHandlerEl && startValue == null) startValue = attr(propertyHandlerEl, filterProperty);
-          
             runner.from(startValue);
           }
 
