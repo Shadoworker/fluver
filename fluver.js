@@ -860,7 +860,7 @@ class F {
   static __SIZES = ["width", "height"];
   static __PATHS = { followPath: "followPath", morphTo: "morphTo", d: "d" };
   static __STROKE = { strokeWidth: "stroke-width", strokeDasharray: "stroke-dasharray", strokeDashoffset: "stroke-dashoffset" };
-  static __EFFECTS = { effectX: "effectX", effectY: "effectY", effectBlur: "effectBlur", effectColor: "effectColor" };
+  static __EFFECTS = { "effectX": "effectX", "effectY": "effectY", "effectBlur": "effectBlur", "effectColor": "effectColor" };
 
   static __GEOM_MODIFIERS = ["d", "points", "text"];
   static EASINGS = {
