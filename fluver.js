@@ -1173,6 +1173,7 @@ class F {
           } else if (prop in F.__EFFECTS) {
             runner = new Morphable();
             const { effectSelector, filterSelector, filterProperty } = step.params;
+            runner.params = step.params;
 
             const effectEl = document.querySelector(`${effectSelector}`)[0];
             const propertyHandlerEl = effectEl?.findOne(filterSelector);
