@@ -852,6 +852,7 @@ class PathReshaper {
 }
 
 const pathMorpherIns = new PathMorpher();
+const _imgCache = new Map();
 
 class F {
   static __TRANSFORMS = ["translateX","translateY","anchor","scaleX","scaleY","rotate","translateZ","rotateX","rotateY","rotateZ","anchorX","anchorY","skew","skewX","skewY","perspective","matrix","matrix3d"];
@@ -900,16 +901,31 @@ class F {
     },
     followVal(followPathTween, progress) {
       const runner = followPathTween.runner, path = runner.followedPath;
-      const centered = runner.params.centered, rotated = runner.params.rotated;
-      const point = (offset = 0) => path.getPointAtLength(progress + offset >= 1 ? progress + offset : 0);
-      const p = point(), p0 = point(-1), p1 = point(+1);
-      const angle = (Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180) / Math.PI;
-      if (!path._followghost) path._followghost = path.cloneNode();
-      path._followghost._bbox = path.getBBox();
-      transform(path._followghost, transform(path), false, true);
-      path._followghost.bbox = () => path._followghost._bbox;
-      transform(path._followghost, {translate : [p.x, p.y]}, true, true);
-      return { transform: transform(path._followghost), angle, rotated, centered };
+      const {centered, rotated} = runner.params;
+
+      // Map path local coords → SVG viewport coords
+      const ctm = path.getCTM();
+      // Get the root SVG element to invert back to SVG user space if needed
+      const svg = path.ownerSVGElement;
+      const svgCTM = svg.getCTM(); // SVG root's own CTM
+
+      function point(offset = 0) {
+        const l = Math.max(0, progress + offset);
+        const p = path.getPointAtLength(l);
+        // Create SVGPoint and map through path's CTM to get viewport coords
+        const pt = svg.createSVGPoint();
+        pt.x = p.x;
+        pt.y = p.y;
+        // Map to screen space, then back to SVG coordinate space
+        return pt.matrixTransform(ctm).matrixTransform(svgCTM.inverse());
+      }
+
+      const p  = point();
+      const p0 = point(-1);
+      const p1 = point(+1);
+      const angle = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
+
+      return { x: p.x, y: p.y, angle, rotated, centered };
     },
     hexToRgba(hex) {
       hex = hex.replace(/[^0-9a-fA-F]/g, "");
@@ -924,49 +940,46 @@ class F {
     },
     cssGrad(el) {
       const isRadial = el.tagName === "radialGradient";
-      const stops = Array.from(el.querySelectorAll("stop")).map(stop => {
-        const offsetAttr = attr(stop, "offset") || "0";
-        const offsetValue = offsetAttr.includes("%") ? offsetAttr : parseFloat(offsetAttr) * 100 + "%";
-        return `${attr(stop, "stop-color") || "rgba(0,0,0,1)"} ${offsetValue}`;
+      const toPercent = v => v.includes("%") ? v : parseFloat(v) * 100 + "%";
+
+      const stops = Array.from(el.querySelectorAll("stop")).map(s => {
+        const offset = toPercent(attr(s, "offset") || "0");
+        return `${attr(s, "stop-color") || "rgba(0,0,0,1)"} ${offset}`;
       }).join(", ");
 
-      if (!isRadial) {
-        const x1 = parseFloat(attr(el, "x1") || 0), y1 = parseFloat(attr(el, "y1") || 0);
-        const x2 = parseFloat(attr(el, "x2") || 0), y2 = parseFloat(attr(el, "y2") || 0);
-        const angle = ((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI + 90) % 360;
-        return `linear-gradient(${angle.toFixed(0)}deg, ${stops})`;
-      }
+      if (isRadial) return `radial-gradient(circle, ${stops})`;
 
-      let cx = attr(el, "cx") || "50%", cy = attr(el, "cy") || "50%";
-      if (!cx.includes("%") && !isNaN(cx)) cx = parseFloat(cx) * 100 + "%";
-      if (!cy.includes("%") && !isNaN(cy)) cy = parseFloat(cy) * 100 + "%";
-      return `radial-gradient(circle ${stops})`;
+      const [x1, y1, x2, y2] = ["x1","y1","x2","y2"].map(k => parseFloat(attr(el, k) || 0));
+      const angle = ((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI + 90) % 360;
+      return `linear-gradient(${angle.toFixed(0)}deg, ${stops})`;
     },
     isText(_el) { return _el.nodeName === "text"; },
     isMedia(_el) { return attr(_el, 'id').split('-')[1] === 'image'; },
     isGradient(_colorString) { return _colorString.includes && _colorString.includes("%"); },
     fmtGrad(initialColor, targetColor) {
       const rgbaRegex = /rgba?(\(\s*\d+\s*,\s*\d+\s*,\s*\d+)(?:\s*,.+?)?\)/g;
-      const toRgbaStr = c => { const x = this.hexToRgba(c); return `rgba(${x.r},${x.g},${x.b},${x.a})`; };
-      if (this.isGradient(targetColor) && !this.isGradient(initialColor)) {
-        if (initialColor[0] === "#") initialColor = toRgbaStr(initialColor);
-        initialColor = targetColor.toLowerCase().replaceAll(rgbaRegex, initialColor);
-      } else if (this.isGradient(initialColor) && !this.isGradient(targetColor)) {
-        if (targetColor[0] === "#") targetColor = toRgbaStr(targetColor);
-        targetColor = initialColor.toLowerCase().replaceAll(rgbaRegex, targetColor);
-      }
+      const toRgba = c => { const x = this.hexToRgba(c); return `rgba(${x.r},${x.g},${x.b},${x.a})`; };
+      const normalize = c => c[0] === "#" ? toRgba(c) : c;
+
+      if (this.isGradient(targetColor) && !this.isGradient(initialColor))
+        initialColor = targetColor.toLowerCase().replaceAll(rgbaRegex, normalize(initialColor));
+      else if (this.isGradient(initialColor) && !this.isGradient(targetColor))
+        targetColor = initialColor.toLowerCase().replaceAll(rgbaRegex, normalize(targetColor));
+
       return { initialColor, targetColor };
     },
-    getGradVals(_colorString) {
-      const type = _colorString.split("-gradient")[0];
-      const part11 = (_colorString.split("gradient(")[1].split("%)")[0] + "%").toLowerCase();
-      const segments = part11.split(", rgba");
-      const angle = segments[0].split("deg")[0];
-      const values = [];
-      for (let i = 1; i < segments.length; i++) {
-        values.push({ color: "rgba" + segments[i].split(") ")[0] + ")", offset: segments[i].split(") ")[1] });
-      }
-      return { type, angle, values };
+    getGradVals(s) {
+      const [type] = s.split("-gradient");
+      const inner = s.split("gradient(")[1].split("%)")[0].toLowerCase() + "%";
+      const [anglePart, ...stops] = inner.split(", rgba");
+      return {
+        type,
+        angle: anglePart.split("deg")[0],
+        values: stops.map(s => ({
+          color:  "rgba" + s.split(") ")[0] + ")",
+          offset: s.split(") ")[1]
+        }))
+      };
     },
     gradDToArr(data) {
       const { angle, values } = data;
@@ -988,7 +1001,7 @@ class F {
     },
     setGradEl(_el, _ghost, _baseColorType = null, _gradientType = null, _gradientAngle = null, _stopPoints = null) {
       const _elemId = attr(_el, "id");
-      const gradientId = `${_elemId}--gradient--item--${_baseColorType}`;
+      const gradientId = `${_elemId}--grad-i--${_baseColorType}`;
       const existing = document.querySelector(`#${gradientId}`);
       if (existing) existing.remove();
 
@@ -1006,30 +1019,40 @@ class F {
       if (_baseColorType === "fill") gradient.applyTo(_ghost._baseRefEl);
       else gradient.applyTo(_el, "stroke");
     },
-    updateImg(el, imgRealWidth = null, imgRealHeight = null, renderMode = "FILL", tile = 4, hspace = 0, vspace = 0) {
-      const imagePattern = document.querySelector(`#${attr(el, 'id')}--pattern--background`);
+    getImageNaturalSize(href) {
+      if (_imgCache.has(href)) return Promise.resolve(_imgCache.get(href));
+      return new Promise(resolve => {
+        const img = new window.Image();
+        img.onload = () => {
+          const size = { w: img.naturalWidth, h: img.naturalHeight };
+          _imgCache.set(href, size);
+          resolve(size);
+        };
+        img.src = href;
+      });
+    },
+    async updateImg(el, imgRealWidth = null, imgRealHeight = null, renderMode = "FILL", tile = 4, hspace = 0, vspace = 0) {
+      const imagePattern = document.querySelector(`#${attr(el, 'id')}--pat-bg`);
       const imagePatternImage = imagePattern.firstChild;
-      const img = new window.Image();
-      img.src = attr(imagePatternImage, 'href');
-      img.onload = () => {
-        if (!imgRealWidth || !imgRealHeight) { imgRealWidth = img.naturalWidth; imgRealHeight = img.naturalHeight; }
-        const elemX = parseFloat(attr(el, 'x')), elemY = parseFloat(attr(el, 'y'));
-        const { width: elemWidth, height: elemHeight } = el.getBBox();
-        const setAttrs = (node, attrs) => Object.entries(attrs).forEach(([k, v]) => attr(node, k, v));
-        if (renderMode === "FILL" || renderMode === "FIT") {
-          const isFill = renderMode === "FILL";
-          const wRatio = elemWidth / imgRealWidth, hRatio = elemHeight / imgRealHeight;
-          const scaler = (imgRealWidth > imgRealHeight) === isFill ? hRatio : wRatio;
-          const newW = imgRealWidth * scaler, newH = imgRealHeight * scaler;
-          setAttrs(imagePattern, { width: imgRealWidth, height: imgRealHeight, x: elemX + (elemWidth - newW) / 2, y: elemY + (elemHeight - newH) / 2 });
-          setAttrs(imagePatternImage, { width: imgRealWidth, height: imgRealHeight, transform: `scale(${scaler})` });
-        } else if (renderMode === "TILE") {
-          if (tile < 1) return;
-          const tileW = imgRealWidth / (100 - tile) * 5, tileH = imgRealHeight / (100 - tile) * 5;
-          setAttrs(imagePattern, { width: tileW + (elemWidth - tileW) * (hspace / 100), height: tileH + (elemHeight - tileH) * (vspace / 100), baseWidth: imgRealWidth, baseHeight: imgRealHeight, hSpacing: hspace, vSpacing: vspace, x: elemX, y: elemY });
-          setAttrs(imagePatternImage, { width: tileW, height: tileH });
-        }
-      };
+      
+      // If dimensions were passed (draw drag case), skip image load entirely
+      if (!imgRealWidth || !imgRealHeight) { const size = await this.getImageNaturalSize(imageContent); imgRealWidth = size.w; imgRealHeight = size.h;}
+      const elemX = parseFloat(attr(el, 'x')), elemY = parseFloat(attr(el, 'y'));
+      const { width: elemWidth, height: elemHeight } = el.getBBox();
+      const setAttrs = (node, attrs) => Object.entries(attrs).forEach(([k, v]) => attr(node, k, v));
+      if (renderMode === "FILL" || renderMode === "FIT") {
+        const isFill = renderMode === "FILL";
+        const wRatio = elemWidth / imgRealWidth, hRatio = elemHeight / imgRealHeight;
+        const scaler = (imgRealWidth > imgRealHeight) === isFill ? hRatio : wRatio;
+        const newW = imgRealWidth * scaler, newH = imgRealHeight * scaler;
+        setAttrs(imagePattern, { width: imgRealWidth, height: imgRealHeight, x: elemX + (elemWidth - newW) / 2, y: elemY + (elemHeight - newH) / 2 });
+        setAttrs(imagePatternImage, { width: imgRealWidth, height: imgRealHeight, transform: `scale(${scaler})` });
+      } else if (renderMode === "TILE") {
+        if (tile < 1) return;
+        const tileW = imgRealWidth / (100 - tile) * 5, tileH = imgRealHeight / (100 - tile) * 5;
+        setAttrs(imagePattern, { width: tileW + (elemWidth - tileW) * (hspace / 100), height: tileH + (elemHeight - tileH) * (vspace / 100), baseWidth: imgRealWidth, baseHeight: imgRealHeight, hSpacing: hspace, vSpacing: vspace, x: elemX, y: elemY });
+        setAttrs(imagePatternImage, { width: tileW, height: tileH });
+      }
     }
   };
 
@@ -1072,8 +1095,8 @@ class F {
       ghost._anchor = anchor;
 
       const tId = attr(el, "id");
-      ghost._baseRefEl = document.querySelector(`#${tId}--def-base-ref`);
-      ghost._maskEl = document.querySelector(`#${tId}--mask--`);
+      ghost._baseRefEl = document.querySelector(`#${tId}--d-b-r`);
+      ghost._maskEl = document.querySelector(`#${tId}--m--`);
       ghost._transalterersStates = {};
 
       if (hasTransforms && !hasTranslateX) {
@@ -1164,7 +1187,8 @@ class F {
           } else if (prop === "followPath") {
             const followedPath = document.querySelector(finalValue);
             if (!followedPath) return;
-            const pathTotalLen = followedPath.getTotalLength();
+            const pathTotalLen = F.utils.getTotLen(followedPath);
+
             finalValue = pathTotalLen;
             if (!step.params?.reversed) runner.from(0);
             else { runner.from(finalValue); finalValue = 0; }
@@ -1237,10 +1261,15 @@ class F {
   }
 
   _elapsed(elapsed) {
-    return this._allTweens.filter(tween => {
-      const isPreDelay = elapsed < tween.delay;
-      return !(this.isPlaying ? isPreDelay : isPreDelay && tween.runner.staggered);
-    });
+    const map = new Map();
+    for (const tween of this._allTweens) {
+      const started = elapsed >= tween.delay;
+      if (this.isPlaying && !started) continue;
+
+      const key = `${tween.el.id()}_${tween.prop}`;
+      if (started || !map.has(key)) map.set(key, tween);
+    }
+    return [...map.values()];
   }
 
   _render(elapsed) {
@@ -1261,6 +1290,7 @@ class F {
     const el = tween.el;
     let val, prop = tween.prop;
     const ghost = tween._ghost;
+    const box = el.getBBox();
 
     val = tween.runner.at(localProgress);
 
@@ -1307,15 +1337,18 @@ class F {
     } else if (prop === "morphTo" || prop === "d") {
       val = tween.runner.interpolator(localProgress);
       attr(el, "d", val);
-    } else if (prop === "followPath") {
-      const fv = F.utils.followVal(tween, val);
-      transform(el, fv.transform, false, true);
-      if (fv.centered) {
-        const { x, y, width, height } = el.getBBox();
-        transform(el, { translate: [-(x + width / 2), -(y + height / 2)] }, true, true);
+    }else if (prop == "followPath") {
+        const { x, y, angle, centered, rotated } = F.utils.followVal(tween, val);          
+        const cx = centered ? box.x + box.width * 0.5 : 0;
+        const cy = centered ? box.y + box.height * 0.5 : 0;
+
+        transform(el, { translateX: x - cx, translateY: y - cy }, false, true)
+
+        if (rotated) {
+          transform(el, { rotate: angle - transform(el).rotate }, true, true);
+        }
       }
-      if (fv.rotated) transform(el, { rotate: fv.angle - transform(el).rotate }, true, true);
-    } else if (prop in F.__COLORS) {
+     else if (prop in F.__COLORS) {
       if (tween.runner.gradientType) {
         const gd = F.utils.parseGradArr(val);
         F.utils.setGradEl(el, ghost, prop, tween.runner.gradientType, gd.angle, gd.stops);
@@ -1323,7 +1356,6 @@ class F {
         attr(prop === "fill" ? (ghost._baseRefEl || el) : el, prop, rgba(val));
       }
     } else if (F.__SIZES.includes(prop)) {
-      const box = el.getBBox();
       box.width = prop === "width" ? val : box.width;
       box.height = prop === "height" ? val : box.height;
       if (F.utils.isText(el)) attr(el, "font-size", val);
@@ -1368,12 +1400,12 @@ class F {
           }
         }
       }
-      attr(el, prop, val);
+      attr((prop == "opacity" ? ghost._baseRefEl?.parentNode ?? el : el), prop, val);
     }
 
     if (F.__GEOM_MODIFIERS.includes(prop)) {
       attr(tween._ghost, prop, val);
-      tween._ghost._bbox = el.getBBox();
+      tween._ghost._bbox = box;
     }
   }
 
