@@ -359,14 +359,14 @@ class Matrix {
     const flipY = o.flip && (flipBoth || o.flip === "y") ? -1 : 1;
     const skewX = o.skew?.length ? o.skew[0] : isFinite(o.skew) ? o.skew : isFinite(o.skewX) ? o.skewX : 0;
     const skewY = o.skew?.length ? o.skew[1] : isFinite(o.skew) ? o.skew : isFinite(o.skewY) ? o.skewY : 0;
-    const scaleX = o.scale?.length ? o.scale[0] * flipX : isFinite(o.scale) ? o.scale * flipX : isFinite(o.scaleX) ? o.scaleX * flipX : flipX;
-    const scaleY = o.scale?.length ? o.scale[1] * flipY : isFinite(o.scale) ? o.scale * flipY : isFinite(o.scaleY) ? o.scaleY * flipY : flipY;
+    const sx = o.scale?.length ? o.scale[0] * flipX : isFinite(o.scale) ? o.scale * flipX : isFinite(o.sx) ? o.sx * flipX : flipX;
+    const sy = o.scale?.length ? o.scale[1] * flipY : isFinite(o.scale) ? o.scale * flipY : isFinite(o.sy) ? o.sy * flipY : flipY;
     const shear = o.shear || 0, theta = o.rotate || o.theta || 0;
     const origin = new Point(o.origin || o.around || o.ox || o.originX, o.oy || o.originY);
     const position = new Point(o.position || o.px || o.positionX || NaN, o.py || o.positionY || NaN);
-    const translate = new Point(o.translate || o.tx || o.translateX, o.ty || o.translateY);
+    const translate = new Point(o.translate || o.tx || o.tx, o.ty || o.ty);
     const relative = new Point(o.relative || o.rx || o.relativeX, o.ry || o.relativeY);
-    return { scaleX, scaleY, skewX, skewY, shear, theta,
+    return { sx, sy, skewX, skewY, shear, theta,
       rx: relative.x, ry: relative.y, tx: translate.x, ty: translate.y,
       ox: origin.x, oy: origin.y, px: position.x, py: position.y };
   }
@@ -395,7 +395,7 @@ class Matrix {
     const sy = (c * sx) / (lam * a - b) || (d * sx) / (lam * b + a);
     const tx = e - cx + cx * ct * sx + cy * (lam * ct * sx - st * sy);
     const ty = f - cy + cx * st * sx + cy * (lam * st * sx + ct * sy);
-    return { scaleX: sx, scaleY: sy, shear: lam, rotate: theta, translateX: tx, translateY: ty,
+    return { sx: sx, sy: sy, shear: lam, rotate: theta, tx: tx, ty: ty,
       originX: cx, originY: cy, a: this.a, b: this.b, c: this.c, d: this.d, e: this.e, f: this.f };
   }
 
@@ -471,7 +471,7 @@ class Matrix {
     const { x: ox, y: oy } = new Point(t.ox, t.oy).transform(this);
     const transformer = new Matrix()
       .txO(t.rx, t.ry).lmulO(this).txO(-ox, -oy)
-      .sclO(t.scaleX, t.scaleY).skwO(t.skewX, t.skewY).shrO(t.shear)
+      .sclO(t.sx, t.sy).skwO(t.skewX, t.skewY).shrO(t.shear)
       .rotO(t.theta).txO(ox, oy);
     if (isFinite(t.px) || isFinite(t.py)) {
       const origin = new Point(ox, oy).transform(transformer);
@@ -574,17 +574,17 @@ const sizingUtility = {
     const box = this.el.getBBox();
     box.width = box.width || 1; box.height = box.height || 1;
     const pathArray = pPath(attr(this.el, 'd'));
-    const scaleX = (v, base) => (v - base.x) * this.width / base.width + base.x;
-    const scaleY = (v, base) => (v - base.y) * this.height / base.height + base.y;
+    const sx = (v, base) => (v - base.x) * this.width / base.width + base.x;
+    const sy = (v, base) => (v - base.y) * this.height / base.height + base.y;
     for (let i = pathArray.length - 1; i >= 0; i--) {
       const l = pathArray[i][0];
       if (l === 'M') {
-        pathArray[i][1] = scaleX(pathArray[i][1], box); pathArray[i][2] = scaleY(pathArray[i][2], box);
+        pathArray[i][1] = sx(pathArray[i][1], box); pathArray[i][2] = sy(pathArray[i][2], box);
       }
       else if (l === 'C') {
-        pathArray[i][1] = scaleX(pathArray[i][1], box); pathArray[i][2] = scaleY(pathArray[i][2], box);
-        pathArray[i][3] = scaleX(pathArray[i][3], box); pathArray[i][4] = scaleY(pathArray[i][4], box);
-        pathArray[i][5] = scaleX(pathArray[i][5], box); pathArray[i][6] = scaleY(pathArray[i][6], box);
+        pathArray[i][1] = sx(pathArray[i][1], box); pathArray[i][2] = sy(pathArray[i][2], box);
+        pathArray[i][3] = sx(pathArray[i][3], box); pathArray[i][4] = sy(pathArray[i][4], box);
+        pathArray[i][5] = sx(pathArray[i][5], box); pathArray[i][6] = sy(pathArray[i][6], box);
       } 
     }
     attr(this.el, 'd', arrToStr(pathArray));
@@ -631,7 +631,7 @@ class NonMorph {
 
 class Morphable {
   constructor(stepper) {
-    const b = F.EASINGS.linear;
+    const b = F.EASINGS.li;
     this._stepper = stepper || new Ease(easing.bezier(b[0], b[1], b[2], b[3]));
     this._from = this._to = this._type = this._context = this._morphObj = null;
   }
@@ -855,27 +855,27 @@ const pathMorpherIns = new PathMorpher();
 const _imgCache = new Map();
 
 class F {
-  static __TRANSFORMS = ["translateX","translateY","anchor","scaleX","scaleY","rotate","translateZ","rotateX","rotateY","rotateZ","anchorX","anchorY","skew","skewX","skewY","perspective","matrix","matrix3d"];
-  static __SCALES = ["scaleX", "scaleY"];
-  static __COLORS = { fill: "fill", stroke: "stroke" };
-  static __SIZES = ["width", "height"];
-  static __PATHS = { followPath: "followPath", morphTo: "morphTo", d: "d" };
-  static __STROKE = { strokeWidth: "stroke-width", strokeDasharray: "stroke-dasharray", strokeDashoffset: "stroke-dashoffset" };
-  static __EFFECTS = { "effectX": "effectX", "effectY": "effectY", "effectBlur": "effectBlur", "effectColor": "effectColor" };
+  static __TRANSFORMS = ["tx","ty","an","sx","sy","rotate","skew"];
+  static __SCALES = ["sx", "sy"];
+  static __COLORS = { f: "f", st: "st" };
+  static __SIZES = ["w", "h"];
+  static __PATHS = { fp: "fp", mo: "mo", d: "d" };
+  static __STROKE = { sw: "stroke-width", da: "stroke-dasharray", do: "stroke-dashoffset" };
+  static __EFFECTS = { "ex": "ex", "ey": "ey", "eb": "eb", "ec": "ec" };
 
   static __GEOM_MODIFIERS = ["d", "points", "text"];
   static EASINGS = {
-    linear: [0.0,0.0,1.0,1.0],
-    easeInQuad: [0.55,0.085,0.68,0.53], easeOutQuad: [0.25,0.46,0.45,0.94], easeInOutQuad: [0.455,0.03,0.515,0.955],
-    easeInCubic: [0.55,0.055,0.675,0.19], easeOutCubic: [0.215,0.61,0.355,1.0], easeInOutCubic: [0.645,0.045,0.355,1.0],
-    easeInQuart: [0.895,0.03,0.685,0.22], easeOutQuart: [0.165,0.84,0.44,1.0], easeInOutQuart: [0.77,0.0,0.175,1.0],
-    easeInQuint: [0.755,0.05,0.855,0.06], easeOutQuint: [0.23,1.0,0.32,1.0], easeInOutQuint: [0.86,0.0,0.07,1.0],
-    easeInSine: [0.47,0.0,0.745,0.715], easeOutSine: [0.39,0.575,0.565,1.0], easeInOutSine: [0.445,0.05,0.55,0.95],
-    easeInExpo: [0.95,0.05,0.795,0.035], easeOutExpo: [0.19,1.0,0.22,1.0], easeInOutExpo: [1.0,0.0,0.0,1.0],
-    easeInCirc: [0.6,0.04,0.98,0.335], easeOutCirc: [0.075,0.82,0.165,1.0], easeInOutCirc: [0.785,0.135,0.15,0.86],
-    easeInElastic: [0.47,-0.03,0.745,0.715], easeOutElastic: [0.39,0.575,0.565,1.425], easeInOutElastic: [0.68,-0.55,0.265,1.55],
-    easeInBounce: [0.6,-0.28,0.735,0.045], easeOutBounce: [0.175,0.885,0.32,1.275], easeInOutBounce: [0.68,-0.55,0.265,1.55],
-  };
+    li:   [0.0,0.0,1.0,1.0],
+    iq:   [0.55,0.085,0.68,0.53],   oq:   [0.25,0.46,0.45,0.94],    ioq:  [0.455,0.03,0.515,0.955],
+    ic:   [0.55,0.055,0.675,0.19],  oc:   [0.215,0.61,0.355,1.0],   ioc:  [0.645,0.045,0.355,1.0],
+    iq4:  [0.895,0.03,0.685,0.22],  oq4:  [0.165,0.84,0.44,1.0],    ioq4: [0.77,0.0,0.175,1.0],
+    iq5:  [0.755,0.05,0.855,0.06],  oq5:  [0.23,1.0,0.32,1.0],      ioq5: [0.86,0.0,0.07,1.0],
+    is:   [0.47,0.0,0.745,0.715],   os:   [0.39,0.575,0.565,1.0],   ios:  [0.445,0.05,0.55,0.95],
+    ie:   [0.95,0.05,0.795,0.035],  oe:   [0.19,1.0,0.22,1.0],      ioe:  [1.0,0.0,0.0,1.0],
+    ir:   [0.6,0.04,0.98,0.335],    or:   [0.075,0.82,0.165,1.0],   ior:  [0.785,0.135,0.15,0.86],
+    iel:  [0.47,-0.03,0.745,0.715], oel:  [0.39,0.575,0.565,1.425], ioel: [0.68,-0.55,0.265,1.55],
+    ib:   [0.6,-0.28,0.735,0.045],  ob:   [0.175,0.885,0.32,1.275], iob:  [0.68,-0.55,0.265,1.55],
+  }
 
   static utils = {
     getDist(p1, p2) { return Math.sqrt((p2.x-p1.x)**2 + (p2.y-p1.y)**2); },
@@ -899,25 +899,26 @@ class F {
         case "polygon": return F.utils.getPolygonLen(el);
       }
     },
-    followVal(followPathTween, progress) {
-      const runner = followPathTween.runner, path = runner.followedPath;
-      const {centered, rotated} = runner.params;
+    
+    followVal(tween, progress) {
+      const el = tween.el;
+      const runner = tween.runner, path = runner.followedPath;
+      const {cd, rd} = runner.p;
 
-      // Map path local coords → SVG viewport coords
-      const ctm = path.getCTM();
-      // Get the root SVG element to invert back to SVG user space if needed
-      const svg = path.ownerSVGElement;
-      const svgCTM = svg.getCTM(); // SVG root's own CTM
+      // Get the SVG root to use as common coordinate space reference
+      const svgRoot = path.ownerSVGElement;
 
       function point(offset = 0) {
-        const l = Math.max(0, progress + offset);
+        const l = progress + offset >= 1 ? progress + offset : 0;
         const p = path.getPointAtLength(l);
-        // Create SVGPoint and map through path's CTM to get viewport coords
-        const pt = svg.createSVGPoint();
-        pt.x = p.x;
-        pt.y = p.y;
-        // Map to screen space, then back to SVG coordinate space
-        return pt.matrixTransform(ctm).matrixTransform(svgCTM.inverse());
+
+        // Create an SVG point and transform it to screen coords via path's CTM
+        const svgPoint = svgRoot.createSVGPoint();
+        svgPoint.x = p.x;
+        svgPoint.y = p.y;
+
+        // Map from path local space → screen space using path's CTM
+        return svgPoint.matrixTransform(path.getCTM());
       }
 
       const p  = point();
@@ -925,8 +926,18 @@ class F {
       const p1 = point(+1);
       const angle = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
 
-      return { x: p.x, y: p.y, angle, rotated, centered };
+      // Now we convert from screen space → the animated element's parent local space
+      const targetParent = el.parentElement;
+      const inverseCTM = targetParent.getCTM().inverse();
+
+      const svgPoint = svgRoot.createSVGPoint();
+      svgPoint.x = p.x;
+      svgPoint.y = p.y;
+      const localPoint = svgPoint.matrixTransform(inverseCTM);
+
+      return { x: localPoint.x, y: localPoint.y, angle, rd, cd };
     },
+
     hexToRgba(hex) {
       hex = hex.replace(/[^0-9a-fA-F]/g, "");
       if (hex.length < 5) hex = hex.split("").map(s => s + s).join("");
@@ -1001,7 +1012,7 @@ class F {
     },
     setGradEl(_el, _ghost, _baseColorType = null, _gradientType = null, _gradientAngle = null, _stopPoints = null) {
       const _elemId = attr(_el, "id");
-      const gradientId = `${_elemId}--grad-i--${_baseColorType}`;
+      const gradientId = `${_elemId}-gr-i-${_baseColorType}`;
       const existing = document.querySelector(`#${gradientId}`);
       if (existing) existing.remove();
 
@@ -1016,7 +1027,7 @@ class F {
         gradient.set({x1:0.5 + 0.5 * Math.cos(rad), y1:0.5 + 0.5 * Math.sin(rad),x2:0.5 - 0.5 * Math.cos(rad), y2:0.5 - 0.5 * Math.sin(rad)});
       }
       gradient.attachTo(svgOwner.querySelector("defs"));
-      if (_baseColorType === "fill") gradient.applyTo(_ghost._baseRefEl);
+      if (_baseColorType === "f") gradient.applyTo(el);
       else gradient.applyTo(_el, "stroke");
     },
     getImageNaturalSize(href) {
@@ -1032,7 +1043,7 @@ class F {
       });
     },
     async updateImg(el, imgRealWidth = null, imgRealHeight = null, renderMode = "FILL", tile = 4, hspace = 0, vspace = 0) {
-      const imagePattern = document.querySelector(`#${attr(el, 'id')}--pat-bg`);
+      const imagePattern = document.querySelector(`#${attr(el, 'id')}-p-bg`);
       const imagePatternImage = imagePattern.firstChild;
       
       // If dimensions were passed (draw drag case), skip image load entirely
@@ -1078,9 +1089,9 @@ class F {
 
   add(data) {
     data = this._reorder(data);
-    const elements = document.querySelectorAll(data.targets) ?? [];
+    const elements = document.querySelectorAll(data.t) ?? [];
     const hasTransforms = this._objectHasProps(data, F.__TRANSFORMS);
-    const hasTranslateX = this._objectHasProps(data, ["translateX"]);
+    const hastx = this._objectHasProps(data, ["tx"]);
     const elementAnimationDuration = this._getElAnimDur(data);
 
     elements.forEach((el, i) => {
@@ -1089,60 +1100,62 @@ class F {
       ghost._bbox = el.getBBox();
       ghost.getBBox = () => ghost._bbox;
 
-      let dataAnchor = attr(el, 'anchor');
+      let dataAnchor = attr(el, 'an');
       dataAnchor = dataAnchor?.replace(/(\w+)\s*:/g, '"$1":');
-      const anchor = dataAnchor ? [JSON.parse(dataAnchor).x, JSON.parse(dataAnchor).y] : [0.5, 0.5];
-      ghost._anchor = anchor;
+      const an = dataAnchor ? [JSON.parse(dataAnchor).x, JSON.parse(dataAnchor).y] : [0.5, 0.5];
+      ghost._anchor = an;
 
       const tId = attr(el, "id");
-      ghost._baseRefEl = document.querySelector(`#${tId}--d-b-r`);
       ghost._maskEl = document.querySelector(`#${tId}--m--`);
       ghost._transalterersStates = {};
 
-      if (hasTransforms && !hasTranslateX) {
-        data["translateX"] = [{ value: transform(snapshot).translateX, duration: elementAnimationDuration }];
+      if (hasTransforms && !hastx) {
+        data["tx"] = [{ value: transform(snapshot).tx, duration: elementAnimationDuration }];
         data = this._reorder(data);
-        ghost._staticTranslateX = true;
+        ghost._statictx = true;
       }
 
-      const item = { el, targets: data.targets, _ghost: ghost, _snapshot: snapshot, animatables: {} };
+      const item = { el, t: data.t, _ghost: ghost, _snapshot: snapshot, animatables: {} };
 
       for (const prop in data) {
-        if (prop === "targets" || !data[prop] || !Array.isArray(data[prop])) continue;
+        if (prop === "t" || !data[prop] || !Array.isArray(data[prop])) continue;
         item.animatables[prop] = [];
         let startValue = this._initState(el, prop, ghost);
         let startAnchor = ghost._anchor;
         const steps = data[prop];
 
         steps?.forEach((step, j) => {
-          const timings = Array.isArray(step.stagger)
-            ? this._calcStagger(step.delay || 0, step.stagger, elements.length, i, step.duration)
-            : [step.delay || 0, 0];
+
+          const value = step.v;
+          const stagger = step.s;
+
+          const timings = Array.isArray(step.s)
+            ? this._calcStagger(step.w || 0, step.s, elements.length, i, step.d)
+            : [step.w || 0, 0];
 
           // Add global timeline delay
-          const stepDuration = step.duration - timings[1];
+          const stepDuration = step.d - timings[1];
 
           let runner = new Morphable();
           if (!(prop in F.__COLORS)) runner.from(startValue);
-          runner.params = step.params;
-
-          let finalValue = step.value;
+          runner.p = step.p;
+          let finalValue = value;
 
           if (F.__TRANSFORMS.includes(prop)) {
-            let val = step.value - startValue.dec()[prop];
-            if (prop === "translateX" || prop === "translateY") {
-              const dx = prop === "translateX" ? val : 0, dy = prop === "translateY" ? val : 0;
+            let val = value - startValue.dec()[prop];
+            if (prop === "tx" || prop === "ty") {
+              const dx = prop === "tx" ? val : 0, dy = prop === "ty" ? val : 0;
               finalValue = startValue.clone().transform({ translate: [dx, dy] }, true);
-              if (prop === "translateY") ghost._transalterersStates[prop] = step.value;
+              if (prop === "ty") ghost._transalterersStates[prop] = value;
             } else {
-              if (prop === "anchor") { runner = new Morphable(); runner.from(startAnchor); }
+              if (prop === "an") { runner = new Morphable(); runner.from(startAnchor); }
               else {
-                if (prop === "scaleX" || prop === "scaleY") val = step.value / startValue.dec()[prop];
+                if (prop === "sx" || prop === "sy") val = value / startValue.dec()[prop];
                 finalValue = startValue.clone().transform({ [prop]: val }, true);
               }
-              ghost._transalterersStates[prop] = step.value;
+              ghost._transalterersStates[prop] = value;
             }
-            startValue = finalValue; startAnchor = step.value;
+            startValue = finalValue; startAnchor = value;
           } else if (prop in F.__COLORS) {
             startValue = Array.isArray(startValue) ? rgba(startValue) : startValue;
             if (F.utils.isGradient(finalValue)) {
@@ -1157,7 +1170,7 @@ class F {
               runner.from(F.utils.rgbaToArr(F.utils.fmtColor(startValue)));
               finalValue = F.utils.rgbaToArr(F.utils.fmtColor(finalValue));
             }
-          } else if (prop === "strokeDasharray") {
+          } else if (prop === "da") {
             runner = new Morphable();
             const diff = finalValue.length - startValue.length;
             if (diff > 0) startValue = [...startValue, ...new Array(diff).fill(startValue.at(-1))];
@@ -1165,9 +1178,9 @@ class F {
             startValue = startValue.map(e => parseInt(e));
             finalValue = finalValue.map(e => parseInt(e));
             runner.from(startValue);
-          } else if (prop === "morphTo") {
+          } else if (prop === "mo") {
             const toPathSelector = finalValue;
-            const fromPath = step.params?.resetPath ? attr(el, "d") : Array.isArray(startValue) ? startValue.toString() : startValue;
+            const fromPath = step.p?.rp ? attr(el, "d") : Array.isArray(startValue) ? startValue.toString() : startValue;
             const toPathEl = document.querySelector(toPathSelector);
             if (!toPathEl) return;
             runner.fromPath = { d: fromPath };
@@ -1184,36 +1197,36 @@ class F {
             startValue = Array.isArray(startValue) ? startValue.toString() : startValue;
             const reshapResult = new PathReshaper().reshape(startValue, finalValue);
             runner.interpolator = pathMorpherIns.mkMorph(reshapResult[0], reshapResult[1]);
-          } else if (prop === "followPath") {
+          } else if (prop === "fp") {
             const followedPath = document.querySelector(finalValue);
             if (!followedPath) return;
             const pathTotalLen = F.utils.getTotLen(followedPath);
 
             finalValue = pathTotalLen;
-            if (!step.params?.reversed) runner.from(0);
+            if (!step.p?.vd) runner.from(0);
             else { runner.from(finalValue); finalValue = 0; }
             runner.followedPath = followedPath;
-            runner.params = { centered: step.params?.centered || false, rotated: step.params?.rotated || false, reversed: step.params?.reversed || false };
+            runner.p = { cd: step.p?.cd || false, rd: step.p?.rd || false, vd: step.p?.vd || false };
           } 
           else if (prop in F.__EFFECTS) {
             runner = new Morphable();
-            const { effectSelector, filterSelector, filterProperty } = step.params;
-            runner.params = step.params;
-            const effectEl = document.querySelector(`${effectSelector}`);
-            const propertyHandlerEl = effectEl?.querySelector(filterSelector);
-            if (propertyHandlerEl && startValue == null) startValue = attr(propertyHandlerEl, filterProperty);
+            const { es, fs, fp } = step.p;
+            runner.p = step.p;
+            const effectEl = document.querySelector(`${es}`);
+            const propertyHandlerEl = effectEl?.querySelector(fs);
+            if (propertyHandlerEl && startValue == null) startValue = attr(propertyHandlerEl, fp);
             runner.from(startValue);
           }
 
-          if (prop === "anchor") runner.to(step.value);
+          if (prop === "an") runner.to(value);
           else runner.to(finalValue);
 
-          runner.staggered = Array.isArray(step.stagger) ? step.stagger : false;
-          const b = F.EASINGS[step.easing] || F.EASINGS.linear;
+          runner.staggered = Array.isArray(step.s) ? step.s : false;
+          const b = F.EASINGS[step.e] || F.EASINGS.li;
           runner.stepper(step.steps ? new Ease(easing.steps(step.steps)) : new Ease(easing.bezier(b[0], b[1], b[2], b[3])));
 
           if (!F.__TRANSFORMS.includes(prop)) startValue = new runner._morphObj.constructor(runner.to());
-          if (prop === "strokeDashoffset") runner.dashoffsetLen = F.utils.getTotLen(el);
+          if (prop === "do") runner.dashoffsetLen = F.utils.getTotLen(el);
 
           const tween = { el, _ghost: ghost, prop, runner, duration: stepDuration, delay: timings[0] };
           item.animatables[prop].push(tween);
@@ -1243,7 +1256,7 @@ class F {
   _getElAnimDur(data) {
     const durations = [];
     for (const prop in data) {
-      if (prop === "targets" || !data[prop] || !Array.isArray(data[prop])) continue;
+      if (prop === "t" || !data[prop] || !Array.isArray(data[prop])) continue;
       data[prop].forEach(kf => durations.push((kf.duration || 0) + (kf.delay || 0)));
     }
     return Math.min(0, Math.max(...durations));
@@ -1266,7 +1279,7 @@ class F {
       const started = elapsed >= tween.delay;
       if (this.isPlaying && !started) continue;
 
-      const key = `${tween.el.id()}_${tween.prop}`;
+      const key = `${attr(tween.el, "id")}_${tween.prop}`;
       if (started || !map.has(key)) map.set(key, tween);
     }
     return [...map.values()];
@@ -1301,8 +1314,8 @@ class F {
 
       const transEl = () => transform(el, transform(ghost), false, true);
 
-      const translateYTransformer = v => {
-        transform(ghost, { translateY: v - transform(ghost).translateY }, true, true);
+      const tyTransformer = v => {
+        transform(ghost, { ty: v - transform(ghost).ty }, true, true);
         transEl()
       };
       const rotateTransformer = v => {
@@ -1315,36 +1328,36 @@ class F {
       };
       const anchorTransform = v => { ghost._anchor = v; };
 
-      if (prop === "translateX") { transform(el, val, false, true); transform(ghost, val, false, true); }
-      else if (prop === "translateY") translateYTransformer(val.dec().translateY);
-      else if (prop === "anchor") anchorTransform(val);
-      else if (F.__SCALES.includes(prop)) scaleTransformer(val.dec().scaleX, val.dec().scaleY);
+      if (prop === "tx") { transform(el, val, false, true); transform(ghost, val, false, true); }
+      else if (prop === "ty") tyTransformer(val.dec().ty);
+      else if (prop === "an") anchorTransform(val);
+      else if (F.__SCALES.includes(prop)) scaleTransformer(val.dec().sx, val.dec().sy);
       else if (prop === "rotate") rotateTransformer(val.dec().rotate);
 
-      const transformers = { translateY: translateYTransformer, anchor: anchorTransform, scaleX: scaleTransformer, scaleY: scaleTransformer, rotate: rotateTransformer };
+      const transformers = { ty: tyTransformer, an: anchorTransform, sx: scaleTransformer, sy: scaleTransformer, rotate: rotateTransformer };
 
-      if (!ghost._staticTranslateX) {
+      if (!ghost._statictx) {
         for (const [p, transformer] of Object.entries(transformers)) {
           if (!this._hasTween(elapsedTweens, el, p)) {
             const v = ghost._transalterersStates[p];
             if (v) {
-              F.__SCALES.includes(p) ? p === "scaleX" ? transformer(v, 1) : transformer(1, v)
+              F.__SCALES.includes(p) ? p === "sx" ? transformer(v, 1) : transformer(1, v)
               : transformer(v);
             }
           }
         }
       }
-    } else if (prop === "morphTo" || prop === "d") {
+    } else if (prop === "mo" || prop === "d") {
       val = tween.runner.interpolator(localProgress);
       attr(el, "d", val);
-    }else if (prop == "followPath") {
-        const { x, y, angle, centered, rotated } = F.utils.followVal(tween, val);          
-        const cx = centered ? box.x + box.width * 0.5 : 0;
-        const cy = centered ? box.y + box.height * 0.5 : 0;
+    }else if (prop == "fp") {
+        const { x, y, angle, cd, rd } = F.utils.followVal(tween, val);          
+        const cx = cd ? box.x + box.width * 0.5 : 0;
+        const cy = cd ? box.y + box.height * 0.5 : 0;
 
-        transform(el, { translateX: x - cx, translateY: y - cy }, false, true)
+        transform(el, { tx: x - cx, ty: y - cy }, false, true)
 
-        if (rotated) {
+        if (rd) {
           transform(el, { rotate: angle - transform(el).rotate }, true, true);
         }
       }
@@ -1353,37 +1366,37 @@ class F {
         const gd = F.utils.parseGradArr(val);
         F.utils.setGradEl(el, ghost, prop, tween.runner.gradientType, gd.angle, gd.stops);
       } else {
-        attr(prop === "fill" ? (ghost._baseRefEl || el) : el, prop, rgba(val));
+        attr(el, prop, rgba(val));
       }
     } else if (F.__SIZES.includes(prop)) {
-      box.width = prop === "width" ? val : box.width;
-      box.height = prop === "height" ? val : box.height;
+      box.width = prop === "w" ? val : box.width;
+      box.height = prop === "h" ? val : box.height;
       if (F.utils.isText(el)) attr(el, "font-size", val);
       else {
         sizingUtility.size(el, box.width, box.height);
         if (F.utils.isMedia(el)) updateImg(el, box.width, box.height);
       }
     } else if (prop in F.__EFFECTS) {
-      const { effectSelector, filterSelector, filterProperty } = tween.runner.params;
-      const effectEl = document.querySelector(`${effectSelector}`);
-      const propertyHandlerEl = effectEl?.querySelector(filterSelector);
+      const { es, fs, fp } = tween.runner.p;
+      const effectEl = document.querySelector(`${es}`);
+      const propertyHandlerEl = effectEl?.querySelector(fs);
       if (propertyHandlerEl) {
-        if (prop === "effectColor" && filterProperty === "flood-color")
+        if (prop === "ec" && fp === "flood-color")
           val = rgba(val);
-        attr(propertyHandlerEl, filterProperty, val.toString());
+        attr(propertyHandlerEl, fp, val.toString());
       }
     } else if (prop === "borderRadius") {
       attr(el, 'rx', val); attr(el, 'ry', val);
     } else if (prop === "maskedBy") {
       const v = val.value[0];
-      const maskHolder = ghost._baseRefEl ? ghost._baseRefEl.parentNode : el;
+      const maskHolder = el.tagName != "g" ? el.parentNode : el;
       if (v !== (attr(maskHolder, "_mask") || "")) {
         attr(maskHolder, "mask", v ? `url(#${v})` : v);
         attr(maskHolder, "_mask", v);
       }
     } else if (prop === "maskType") {
       const f = val.value[0] === "out" ? ["black", "white"] : ["white", "black"];
-      ghost._maskEl.childNodes.forEach((c, i) => attr(c, "fill", i === 0 ? f[0] : f[1]));
+      ghost._maskEl.childNodes.forEach((c, i) => attr(c, "f", i === 0 ? f[0] : f[1]));
     } else {
       if (prop in F.__STROKE) {
         prop = F.__STROKE[prop];
@@ -1400,7 +1413,7 @@ class F {
           }
         }
       }
-      attr((prop == "opacity" ? ghost._baseRefEl?.parentNode ?? el : el), prop, val);
+      attr((prop == "opacity" && el.tagName != "g" ? el.parentNode : el), prop, val);
     }
 
     if (F.__GEOM_MODIFIERS.includes(prop)) {
@@ -1460,22 +1473,22 @@ class F {
   _initState(el, prop, ghost) {
     if (F.__TRANSFORMS.includes(prop)) return new Matrix(el);
     if (prop in F.__COLORS) {
-      const fill = attr(ghost._baseRefEl || el, prop) || "#000";
+      const fill = attr(el, prop) || "#000";
       if (fill.includes("url")) {
         const id = fill.match(/#([^") ]*)/)[1];
         return F.utils.cssGrad(document.querySelector(`#${id}`));
       }
       return fill;
     }
-    if (prop === "followPath") return 0;
+    if (prop === "fp") return 0;
     if (prop in F.__PATHS) return attr(el, "d");
     if (prop in F.__EFFECTS) return null;
     if (prop === "borderRadius") return attr(el, "rx") || 0;
     if (prop === "maskedBy") {
-      const mask = attr(ghost._baseRefEl?.parentNode ?? el, "mask") || "";
+      const mask = attr(el.tagName != "g" ? el.parentNode : el, "mask") || "";
       return mask.split("#")[1]?.slice(0, -1) ?? "";
     }
-    if (prop === "maskType") return attr(ghost._maskEl.firstChild, "fill") === "white" ? "in" : "out";
+    if (prop === "maskType") return attr(ghost._maskEl.firstChild, "f") === "white" ? "in" : "out";
     return attr(el, prop) || 0;
   }
 
