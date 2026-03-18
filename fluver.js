@@ -665,7 +665,7 @@ class PathMorpher {
   constructor(segments = 128) {
     this.segments = segments;
     // Uses a hidden SVG path element to sample existing shapes
-    this.sampler = typeof document !== 'undefined' ? document.createElementNS("http://www.w3.org/2000/svg", "path") : null;
+    this.sampler =  document.createElementNS("http://www.w3.org/2000/svg", "path");
   }
   // 1. Convert any path string into an array of [x, y] points
   sample(d) {
@@ -1332,7 +1332,7 @@ class F {
       else if (prop === "ty") tyTransformer(val.dec().ty);
       else if (prop === "an") anchorTransform(val);
       else if (F.__SCALES.includes(prop)) scaleTransformer(val.dec().sx, val.dec().sy);
-      else if (prop === "rotate") rotateTransformer(val.dec().rotate);
+      else if (prop === "ro") rotateTransformer(val.dec().rotate);
 
       const transformers = { ty: tyTransformer, an: anchorTransform, sx: scaleTransformer, sy: scaleTransformer, rotate: rotateTransformer };
 
@@ -1385,23 +1385,23 @@ class F {
           val = rgba(val);
         attr(propertyHandlerEl, fp, val.toString());
       }
-    } else if (prop === "borderRadius") {
+    } else if (prop === "rd") {
       attr(el, 'rx', val); attr(el, 'ry', val);
-    } else if (prop === "maskedBy") {
+    } else if (prop === "mb") {
       const v = val.value[0];
       const maskHolder = el.tagName != "g" ? el.parentNode : el;
       if (v !== (attr(maskHolder, "_mask") || "")) {
         attr(maskHolder, "mask", v ? `url(#${v})` : v);
         attr(maskHolder, "_mask", v);
       }
-    } else if (prop === "maskType") {
+    } else if (prop === "mt") {
       const f = val.value[0] === "out" ? ["black", "white"] : ["white", "black"];
       ghost._maskEl.childNodes.forEach((c, i) => attr(c, "f", i === 0 ? f[0] : f[1]));
     } else {
       if (prop in F.__STROKE) {
         prop = F.__STROKE[prop];
-        if (prop === "stroke-dasharray") val = val.join(" ").trim();
-        if (prop === "stroke-dashoffset") {
+        if (prop === "da") val = val.join(" ").trim();
+        if (prop === "do") {
           let dashoffsetLen = tween.runner.dashoffsetLen;
           const targetSizeChanged = this._elHasProps(el, [...F.__SIZES, ...F.__SCALES]);
           if (targetSizeChanged) dashoffsetLen = F.utils.getTotLen(el);
@@ -1413,7 +1413,7 @@ class F {
           }
         }
       }
-      attr((prop == "opacity" && el.tagName != "g" ? el.parentNode : el), prop, val);
+      attr((prop == "op" && el.tagName != "g" ? el.parentNode : el), prop, val);
     }
 
     if (F.__GEOM_MODIFIERS.includes(prop)) {
@@ -1483,12 +1483,12 @@ class F {
     if (prop === "fp") return 0;
     if (prop in F.__PATHS) return attr(el, "d");
     if (prop in F.__EFFECTS) return null;
-    if (prop === "borderRadius") return attr(el, "rx") || 0;
-    if (prop === "maskedBy") {
+    if (prop === "rd") return attr(el, "rx") || 0;
+    if (prop === "mb") {
       const mask = attr(el.tagName != "g" ? el.parentNode : el, "mask") || "";
       return mask.split("#")[1]?.slice(0, -1) ?? "";
     }
-    if (prop === "maskType") return attr(ghost._maskEl.firstChild, "f") === "white" ? "in" : "out";
+    if (prop === "mt") return attr(ghost._maskEl.firstChild, "f") === "white" ? "in" : "out";
     return attr(el, prop) || 0;
   }
 
