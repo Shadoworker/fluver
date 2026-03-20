@@ -900,42 +900,75 @@ class F {
       }
     },
     
+    buildLUT(pathNode, samples = 1000) {
+      const svgRoot = pathNode.ownerSVGElement;
+      const ctm = pathNode.getCTM();
+      const totalLen = this.getTotLen(pathNode);
+
+      const lut = Array.from({ length: samples + 1 }, (_, i) => {
+        const sp = svgRoot.createSVGPoint();
+        const local = pathNode.getPointAtLength((i / samples) * totalLen);
+        sp.x = local.x; sp.y = local.y;
+        return sp.matrixTransform(ctm);
+      });
+
+      const arcLengths = lut.reduce((acc, p, i) => {
+        if (i === 0) return [0];
+        const dx = p.x - lut[i-1].x, dy = p.y - lut[i-1].y;
+        return [...acc, acc[i-1] + Math.sqrt(dx*dx + dy*dy)];
+      }, []);
+
+      return { lut, arcLengths, total: arcLengths.at(-1) };
+    },
+
+    sampleLUT({ lut, arcLengths, total }, t) {
+      const target = Math.max(0, Math.min(1, t)) * total;
+      let lo = 0, hi = lut.length - 1;
+      while (lo < hi - 1) {
+        const mid = (lo + hi) >> 1;
+        arcLengths[mid] < target ? lo = mid : hi = mid;
+      }
+      const alpha = (target - arcLengths[lo]) / (arcLengths[hi] - arcLengths[lo] || 1);
+      return {
+        x: lut[lo].x + (lut[hi].x - lut[lo].x) * alpha,
+        y: lut[lo].y + (lut[hi].y - lut[lo].y) * alpha,
+      };
+    },
+
     followVal(tween, progress) {
       const el = tween.el;
       const runner = tween.runner, path = runner.followedPath;
       const {cd, rd} = runner.p;
 
-      // Get the SVG root to use as common coordinate space reference
       const svgRoot = path.ownerSVGElement;
+      // Sample two adjacent points in screen space for tangent
+      const STEP = 0.001;
+      const p0 = this.sampleLUT(runner.lutData, progress - STEP);
+      const p1 = this.sampleLUT(runner.lutData, progress + STEP);
+      // Current point
+      const screenPt = this.sampleLUT(runner.lutData, progress);
 
-      function point(offset = 0) {
-        const l = progress + offset >= 1 ? progress + offset : 0;
-        const p = path.getPointAtLength(l);
+      // Angle in screen space
+      let angle = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
+    
+      // Convert screen → parent local space
+      const targetParent = el.parentNode;
+      const parentCTM = targetParent.getCTM();
 
-        // Create an SVG point and transform it to screen coords via path's CTM
-        const svgPoint = svgRoot.createSVGPoint();
-        svgPoint.x = p.x;
-        svgPoint.y = p.y;
+      const sp = svgRoot.createSVGPoint();
+      sp.x = screenPt.x;
+      sp.y = screenPt.y;
 
-        // Map from path local space → screen space using path's CTM
-        return svgPoint.matrixTransform(path.getCTM());
+      const p = sp.matrixTransform(parentCTM.inverse())
+
+      // Subtract parent's own rotation from screen angle
+      // so the element rotates relative to its parent space, not screen
+      if (rd && parentCTM) {
+        const parentAngle = Math.atan2(parentCTM.b, parentCTM.a) * 180 / Math.PI;
+        angle = angle - parentAngle;
       }
 
-      const p  = point();
-      const p0 = point(-1);
-      const p1 = point(+1);
-      const angle = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
-
-      // Now we convert from screen space → the animated element's parent local space
-      const targetParent = el.parentElement;
-      const inverseCTM = targetParent.getCTM().inverse();
-
-      const svgPoint = svgRoot.createSVGPoint();
-      svgPoint.x = p.x;
-      svgPoint.y = p.y;
-      const localPoint = svgPoint.matrixTransform(inverseCTM);
-
-      return { x: localPoint.x, y: localPoint.y, angle, rd, cd };
+      return { x: p.x, y: p.y, angle, rd, cd};
     },
 
     hexToRgba(hex) {
@@ -1206,6 +1239,7 @@ class F {
             if (!step.p?.vd) runner.from(0);
             else { runner.from(finalValue); finalValue = 0; }
             runner.followedPath = followedPath;
+            runner.lutData = F.utils.buildLUT(followedPath);
             runner.p = { cd: step.p?.cd || false, rd: step.p?.rd || false, vd: step.p?.vd || false };
           } 
           else if (prop in F.__EFFECTS) {
@@ -1351,7 +1385,7 @@ class F {
       val = tween.runner.interpolator(localProgress);
       attr(el, "d", val);
     }else if (prop == "fp") {
-        const { x, y, angle, cd, rd } = F.utils.followVal(tween, val);          
+        const { x, y, angle, cd, rd } = F.utils.followVal(tween, localProgress);          
         const cx = cd ? box.x + box.width * 0.5 : 0;
         const cy = cd ? box.y + box.height * 0.5 : 0;
 
@@ -1428,44 +1462,42 @@ class F {
   }
 
   play(direction = 1) {
-    this.pause();
-    setTimeout(() => {
-      this._cleanDirtyProps();
-      this.isPlaying = true;
-      this.isCompleted = false;
-      if (direction === 1 && this.lastElapsed >= this.maxDuration) this.lastElapsed = 0;
-      if (direction === -1 && this.lastElapsed <= 0) this.lastElapsed = this.maxDuration;
+    // this.pause();
+    this._cleanDirtyProps();
+    this.isPlaying = true;
+    this.isCompleted = false;
+    if (direction === 1 && this.lastElapsed >= this.maxDuration) this.lastElapsed = 0;
+    if (direction === -1 && this.lastElapsed <= 0) this.lastElapsed = this.maxDuration;
 
-      let startTime = null;
-      const initialElapsed = this.lastElapsed;
-      const tick = now => {
-        if (!startTime) startTime = now;
-        const progressDelta = (now - startTime) * this.config.speed;
-        let elapsed = direction === 1 ? initialElapsed + progressDelta : initialElapsed - progressDelta;
+    let startTime = null;
+    const initialElapsed = this.lastElapsed;
+    const tick = now => {
+      if (!startTime) startTime = now;
+      const progressDelta = (now - startTime) * this.config.speed;
+      let elapsed = direction === 1 ? initialElapsed + progressDelta : initialElapsed - progressDelta;
 
-        if (elapsed > this.maxDuration || elapsed < 0) {
-          if (this.config.loop) {
-            this.lastElapsed = elapsed > this.maxDuration ? 0 : this.maxDuration;
-            startTime = now;
-            this.play(direction);
-          } else {
-            this.lastElapsed = elapsed > this.maxDuration ? this.maxDuration : 0;
-            this._render(this.lastElapsed);
-            if (this.config.onComplete) this.config.onComplete();
-            this.pause();
-            if (this.lastElapsed === this.maxDuration) this.isCompleted = true;
-          }
-          return;
+      if (elapsed > this.maxDuration || elapsed < 0) {
+        if (this.config.loop) {
+          this.lastElapsed = elapsed > this.maxDuration ? 0 : this.maxDuration;
+          startTime = now;
+          this.play(direction);
+        } else {
+          this.lastElapsed = elapsed > this.maxDuration ? this.maxDuration : 0;
+          this._render(this.lastElapsed);
+          if (this.config.onComplete) this.config.onComplete();
+          this.pause();
+          if (this.lastElapsed === this.maxDuration) this.isCompleted = true;
         }
+        return;
+      }
 
-        this.lastElapsed = elapsed;
-        this._render(elapsed);
-        this.progress = (elapsed / this.maxDuration) * 100;
-        if (this.config.onUpdate) this.config.onUpdate();
-        this.rafId = requestAnimationFrame(tick);
-      };
+      this.lastElapsed = elapsed;
+      this._render(elapsed);
+      this.progress = (elapsed / this.maxDuration) * 100;
+      if (this.config.onUpdate) this.config.onUpdate();
       this.rafId = requestAnimationFrame(tick);
-    }, 100);
+    };
+    this.rafId = requestAnimationFrame(tick);
   }
 
   pause() { this.isPlaying = false; if (this.rafId) cancelAnimationFrame(this.rafId); }
