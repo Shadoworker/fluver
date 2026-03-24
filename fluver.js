@@ -361,7 +361,7 @@ class Matrix {
     const skewY = o.skew?.length ? o.skew[1] : isFinite(o.skew) ? o.skew : isFinite(o.skewY) ? o.skewY : 0;
     const sx = o.scale?.length ? o.scale[0] * flipX : isFinite(o.scale) ? o.scale * flipX : isFinite(o.sx) ? o.sx * flipX : flipX;
     const sy = o.scale?.length ? o.scale[1] * flipY : isFinite(o.scale) ? o.scale * flipY : isFinite(o.sy) ? o.sy * flipY : flipY;
-    const shear = o.shear || 0, theta = o.rotate || o.theta || 0;
+    const shear = o.shear || 0, theta = o.ro || o.theta || 0;
     const origin = new Point(o.origin || o.around || o.ox || o.originX, o.oy || o.originY);
     const position = new Point(o.position || o.px || o.positionX || NaN, o.py || o.positionY || NaN);
     const translate = new Point(o.translate || o.tx || o.tx, o.ty || o.ty);
@@ -395,7 +395,7 @@ class Matrix {
     const sy = (c * sx) / (lam * a - b) || (d * sx) / (lam * b + a);
     const tx = e - cx + cx * ct * sx + cy * (lam * ct * sx - st * sy);
     const ty = f - cy + cx * st * sx + cy * (lam * st * sx + ct * sy);
-    return { sx: sx, sy: sy, shear: lam, rotate: theta, tx: tx, ty: ty,
+    return { sx: sx, sy: sy, shear: lam, ro: theta, tx: tx, ty: ty,
       originX: cx, originY: cy, a: this.a, b: this.b, c: this.c, d: this.d, e: this.e, f: this.f };
   }
 
@@ -855,7 +855,7 @@ const pathMorpherIns = new PathMorpher();
 const _imgCache = new Map();
 
 class F {
-  static __TRANSFORMS = ["tx","ty","an","sx","sy","rotate","skew"];
+  static __TRANSFORMS = ["tx","ty","an","sx","sy","ro","skew"];
   static __SCALES = ["sx", "sy"];
   static __COLORS = { f: "f", st: "st" };
   static __SIZES = ["w", "h"];
@@ -962,7 +962,7 @@ class F {
       const p = sp.matrixTransform(parentCTM.inverse())
 
       // Subtract parent's own rotation from screen angle
-      // so the element rotates relative to its parent space, not screen
+      // so the element ros relative to its parent space, not screen
       if (rd && parentCTM) {
         const parentAngle = Math.atan2(parentCTM.b, parentCTM.a) * 180 / Math.PI;
         angle = angle - parentAngle;
@@ -1133,7 +1133,7 @@ class F {
       ghost._bbox = el.getBBox();
       ghost.getBBox = () => ghost._bbox;
 
-      let dataAnchor = attr(el, 'an');
+      let dataAnchor = attr(el, 'anchor');
       dataAnchor = dataAnchor?.replace(/(\w+)\s*:/g, '"$1":');
       const an = dataAnchor ? [JSON.parse(dataAnchor).x, JSON.parse(dataAnchor).y] : [0.5, 0.5];
       ghost._anchor = an;
@@ -1160,10 +1160,10 @@ class F {
         steps?.forEach((step, j) => {
 
           const value = step.v;
-          const stagger = step.s;
+          const g = step.s;
 
-          const timings = Array.isArray(step.s)
-            ? this._calcStagger(step.w || 0, step.s, elements.length, i, step.d)
+          const timings = Array.isArray(g)
+            ? this._calcStagger(step.w || 0, g, elements.length, i, step.d)
             : [step.w || 0, 0];
 
           // Add global timeline delay
@@ -1190,6 +1190,7 @@ class F {
             }
             startValue = finalValue; startAnchor = value;
           } else if (prop in F.__COLORS) {
+
             startValue = Array.isArray(startValue) ? rgba(startValue) : startValue;
             if (F.utils.isGradient(finalValue)) {
               runner = new Morphable();
@@ -1255,7 +1256,7 @@ class F {
           if (prop === "an") runner.to(value);
           else runner.to(finalValue);
 
-          runner.staggered = Array.isArray(step.s) ? step.s : false;
+          runner.staggered = Array.isArray(g) ? g : false;
           const b = F.EASINGS[step.e] || F.EASINGS.li;
           runner.stepper(step.steps ? new Ease(easing.steps(step.steps)) : new Ease(easing.bezier(b[0], b[1], b[2], b[3])));
 
@@ -1341,34 +1342,38 @@ class F {
 
     val = tween.runner.at(localProgress);
 
-    if (F.__TRANSFORMS.includes(prop)) {
-      const { x: bx, y: by, width: bw, height: bh } = ghost.getBBox();
-      const ox = bx + bw * ghost._anchor[0];
-      const oy = by + bh * ghost._anchor[1];
+    const { x: bx, y: by, width: bw, height: bh } = ghost.getBBox();
+    const ox = bx + bw * ghost._anchor[0];
+    const oy = by + bh * ghost._anchor[1];
 
-      const transEl = () => transform(el, transform(ghost), false, true);
+    if (F.__TRANSFORMS.includes(prop)) {
+
+      const trSrc = this._hasTween(elapsedTweens, el, "fp") ? el : ghost;
+
+      const transEl = () => transform(el, transform(trSrc), false, true);
 
       const tyTransformer = v => {
         transform(ghost, { ty: v - transform(ghost).ty }, true, true);
         transEl()
       };
-      const rotateTransformer = v => {
-        transform(ghost, { rotate: v - transform(ghost).rotate, ox, oy }, true, true);
+      const roTransformer = v => {
+        transform(trSrc, { ro: v - transform(trSrc).ro, ox, oy }, true, true);
         transEl()
       };
       const scaleTransformer = (tsX, tsY) => {
-        transform(ghost, { scale: [tsX, tsY], ox, oy }, true, true);
+        transform(trSrc, { scale: [tsX, tsY], ox, oy }, true, true);
         transEl()
       };
       const anchorTransform = v => { ghost._anchor = v; };
 
-      if (prop === "tx") { transform(el, val, false, true); transform(ghost, val, false, true); }
+       
+      if (prop === "tx" && !this._hasTween(elapsedTweens, el, "fp")) { transform(el, val, false, true); transform(ghost, val, false, true); }
       else if (prop === "ty") tyTransformer(val.dec().ty);
       else if (prop === "an") anchorTransform(val);
       else if (F.__SCALES.includes(prop)) scaleTransformer(val.dec().sx, val.dec().sy);
-      else if (prop === "ro") rotateTransformer(val.dec().rotate);
+      else if (prop === "ro") roTransformer(val.dec().ro);
 
-      const transformers = { ty: tyTransformer, an: anchorTransform, sx: scaleTransformer, sy: scaleTransformer, rotate: rotateTransformer };
+      const transformers = { ty: tyTransformer, an: anchorTransform, sx: scaleTransformer, sy: scaleTransformer, ro: roTransformer };
 
       if (!ghost._statictx) {
         for (const [p, transformer] of Object.entries(transformers)) {
@@ -1386,13 +1391,13 @@ class F {
       attr(el, "d", val);
     }else if (prop == "fp") {
         const { x, y, angle, cd, rd } = F.utils.followVal(tween, localProgress);          
-        const cx = cd ? box.x + box.width * 0.5 : 0;
-        const cy = cd ? box.y + box.height * 0.5 : 0;
+        const cx = cd ? ox : 0;
+        const cy = cd ? oy : 0;
 
         transform(el, { tx: x - cx, ty: y - cy }, false, true)
 
         if (rd) {
-          transform(el, { rotate: angle - transform(el).rotate }, true, true);
+          transform(el, { ro: angle - transform(el).ro }, true, true);
         }
       }
      else if (prop in F.__COLORS) {
@@ -1447,7 +1452,7 @@ class F {
           }
         }
       }
-      attr((prop == "op" && el.tagName != "g" ? el.parentNode : el), prop, val);
+      attr((prop == "op" && el.tagName != "g" ? el.parentNode : el), prop == "op" ? "opacity" : prop, val);
     }
 
     if (F.__GEOM_MODIFIERS.includes(prop)) {
@@ -1505,7 +1510,7 @@ class F {
   _initState(el, prop, ghost) {
     if (F.__TRANSFORMS.includes(prop)) return new Matrix(el);
     if (prop in F.__COLORS) {
-      const fill = attr(el, prop) || "#000";
+      const fill = attr((prop == "fill" && el.tagName != "g" ) ? el.parentNode : el, prop == "f" ? "fill" : "stroke") || "#000";
       if (fill.includes("url")) {
         const id = fill.match(/#([^") ]*)/)[1];
         return F.utils.cssGrad(document.querySelector(`#${id}`));
@@ -1526,7 +1531,7 @@ class F {
 
   _reorder(obj) {
     const result = {};
-    [...F.__TRANSFORMS, ...F.__SIZES].forEach(key => { if (key in obj) result[key] = obj[key]; });
+    [F.__PATHS.fp,...F.__TRANSFORMS, ...F.__SIZES].forEach(key => { if (key in obj) result[key] = obj[key]; });
     Object.keys(obj).forEach(key => { if (!(key in result)) result[key] = obj[key]; });
     return result;
   }
@@ -1540,5 +1545,4 @@ class F {
       const relIndex = Math.floor((index - s) / r);
       return [Math.ceil(delay + segWidth * relIndex), Math.ceil(step - segWidth)];
     }
-  
 }
