@@ -5,29 +5,6 @@ const delimiter = /[\s,]+/;
 const attr = (el, k, v) => v === undefined ? el.getAttribute(k) : el.setAttribute(k, v);
 const rgba = v => `rgba(${v[0]},${v[1]},${v[2]},${v[3]})`;
 
-function getOrig(o, element) {
-  const origin = o.origin;
-  let ox = o.ox ?? o.originX ?? "center";
-  let oy = o.oy ?? o.originY ?? "center";
-
-  if (origin != null) {
-    [ox, oy] = Array.isArray(origin) ? origin
-      : typeof origin === "object" ? [origin.x, origin.y]
-      : [origin, origin];
-  }
-
-  const condX = typeof ox === "string";
-  const condY = typeof oy === "string";
-
-  if (condX || condY) {
-    const { height, width, x, y } = element.getBBox();
-    if (condX) ox = ox.includes("left") ? x : ox.includes("right") ? x + width : x + width / 2;
-    if (condY) oy = oy.includes("top") ? y : oy.includes("bottom") ? y + height : y + height / 2;
-  }
-
-  return [ox, oy];
-}
-
 const rad = d => ((d % 360) * Math.PI) / 180;
 
 const segmentParameters = { M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, A: 7, Z: 0 };
@@ -312,7 +289,7 @@ class Gradient {
 
   // Chainable stop adder
   addStop(offset, color, opacity = 1) {
-    const off = typeof offset === "number" ? `${(offset * 100).toFixed(2)}%` : offset;
+    const off =`${(offset).toFixed(2)}%`;
     this.stops.push({ offset: off, color, opacity });
     return this;
   }
@@ -606,7 +583,6 @@ function transform(el, o, relative, apply = false) {
     const decomposed = new Matrix(el).dec();
     return o == null ? decomposed : decomposed[o];
   }
-  if (!Matrix.isMx(o)) o = { ...o, origin: getOrig(o, el) };
   const cleanRelative = relative === true ? el : relative || false;
   const result = new Matrix(cleanRelative).transform(o);
   return apply ? attr(el, "transform", result) : result;
@@ -970,18 +946,7 @@ class F {
 
       return { x: p.x, y: p.y, angle, rd, cd};
     },
-
-    hexToRgba(hex) {
-      hex = hex.replace(/[^0-9a-fA-F]/g, "");
-      if (hex.length < 5) hex = hex.split("").map(s => s + s).join("");
-      const rgba = hex.match(/.{1,2}/g).map(s => parseInt(s, 16));
-      rgba[3] = rgba.length > 3 ? parseFloat((rgba[3] / 255).toFixed(2)) : 1;
-      return { r: rgba[0], g: rgba[1], b: rgba[2], a: rgba[3] };
-    },
-    fmtColor(color) {
-      if (color[0] === "#") { const c = this.hexToRgba(color); return `rgba(${c.r},${c.g},${c.b},${c.a})`; }
-      return color;
-    },
+ 
     cssGrad(el) {
       const isRadial = el.tagName === "radialGradient";
       const toPercent = v => v.includes("%") ? v : parseFloat(v) * 100 + "%";
@@ -1002,13 +967,11 @@ class F {
     isGradient(_colorString) { return _colorString.includes && _colorString.includes("%"); },
     fmtGrad(initialColor, targetColor) {
       const rgbaRegex = /rgba?(\(\s*\d+\s*,\s*\d+\s*,\s*\d+)(?:\s*,.+?)?\)/g;
-      const toRgba = c => { const x = this.hexToRgba(c); return `rgba(${x.r},${x.g},${x.b},${x.a})`; };
-      const normalize = c => c[0] === "#" ? toRgba(c) : c;
 
       if (this.isGradient(targetColor) && !this.isGradient(initialColor))
-        initialColor = targetColor.toLowerCase().replaceAll(rgbaRegex, normalize(initialColor));
+        initialColor = targetColor.toLowerCase().replaceAll(rgbaRegex, initialColor);
       else if (this.isGradient(initialColor) && !this.isGradient(targetColor))
-        targetColor = initialColor.toLowerCase().replaceAll(rgbaRegex, normalize(targetColor));
+        targetColor = initialColor.toLowerCase().replaceAll(rgbaRegex, targetColor);
 
       return { initialColor, targetColor };
     },
@@ -1191,7 +1154,7 @@ class F {
             startValue = finalValue; startAnchor = value;
           } else if (prop in F.__COLORS) {
 
-            startValue = Array.isArray(startValue) ? rgba(startValue) : startValue;
+            const finalValueTmp = finalValue;
             if (F.utils.isGradient(finalValue)) {
               runner = new Morphable();
               const formatted = F.utils.fmtGrad(startValue, finalValue);
@@ -1201,9 +1164,12 @@ class F {
               runner.from(initGrad.toLocaleString());
               runner.gradientType = finalGrad.type;
             } else {
-              runner.from(F.utils.rgbaToArr(F.utils.fmtColor(startValue)));
-              finalValue = F.utils.rgbaToArr(F.utils.fmtColor(finalValue));
+              runner.from(F.utils.rgbaToArr(startValue));
+              finalValue = F.utils.rgbaToArr(finalValue);
             }
+
+            startValue = finalValueTmp;
+
           } else if (prop === "da") {
             runner = new Morphable();
             const diff = finalValue.length - startValue.length;
@@ -1260,7 +1226,8 @@ class F {
           const b = F.EASINGS[step.e] || F.EASINGS.li;
           runner.stepper(step.steps ? new Ease(easing.steps(step.steps)) : new Ease(easing.bezier(b[0], b[1], b[2], b[3])));
 
-          if (!F.__TRANSFORMS.includes(prop)) startValue = new runner._morphObj.constructor(runner.to());
+          if (!(F.__TRANSFORMS.includes(prop)) && !(prop in F.__COLORS))
+            startValue = new runner._morphObj.constructor(runner.to());
           if (prop === "do") runner.dashoffsetLen = F.utils.getTotLen(el);
 
           const tween = { el, _ghost: ghost, prop, runner, duration: stepDuration, delay: timings[0] };
@@ -1426,7 +1393,11 @@ class F {
       }
     } else if (prop === "rd") {
       attr(el, 'rx', val); attr(el, 'ry', val);
-    } else if (prop === "mb") {
+    }
+    else if (prop == "v") {
+      if (val != Number(el.style.visibility !== "hidden")) el.style.visibility = val == 1 ? "visible" : "hidden";
+    }
+    else if (prop === "mb") {
       const v = val.value[0];
       const maskHolder = el.tagName != "g" ? el.parentNode : el;
       if (v !== (attr(maskHolder, "_mask") || "")) {
@@ -1438,24 +1409,27 @@ class F {
       ghost._maskEl.childNodes.forEach((c, i) => attr(c, "f", i === 0 ? f[0] : f[1]));
     } else {
       if (prop in F.__STROKE) {
+        const p = prop;
         prop = F.__STROKE[prop];
-        if (prop === "da") val = val.join(" ").trim();
-        if (prop === "do") {
+        if (p === "da") val = val.join(" ").trim();
+        if (p === "do") {
           let dashoffsetLen = tween.runner.dashoffsetLen;
           const targetSizeChanged = this._elHasProps(el, [...F.__SIZES, ...F.__SCALES]);
           if (targetSizeChanged) dashoffsetLen = F.utils.getTotLen(el);
           val = dashoffsetLen * (val / 100);
-          if (!attr(el, "stroke-dasharray") || targetSizeChanged) {
-            if (!attr(el, "stroke-dasharray"))
-              this.dirtyProperties.add({ el: el, property: "stroke-dasharray" });
-            attr(el, "stroke-dasharray", dashoffsetLen);
+          const da = "stroke-dasharray";
+          if (!attr(el, da) || targetSizeChanged) {
+            if (!attr(el, da))
+              this.dirtyProperties.add({ el: el, property: da });
+            attr(el, da, dashoffsetLen);
           }
         }
       }
-      attr((prop == "op" && el.tagName != "g" ? el.parentNode : el), prop == "op" ? "opacity" : prop, val);
+
+      attr((prop == "op" ? el.parentNode : el), prop == "op" ? "opacity" : prop, val);
     }
 
-    if (F.__GEOM_MODIFIERS.includes(prop)) {
+    if (F.__GEOM_MODIFIERS.includes(prop) && F.utils.isMedia(el)) {
       attr(tween._ghost, prop, val);
       tween._ghost._bbox = box;
     }
@@ -1510,7 +1484,7 @@ class F {
   _initState(el, prop, ghost) {
     if (F.__TRANSFORMS.includes(prop)) return new Matrix(el);
     if (prop in F.__COLORS) {
-      const fill = attr((prop == "fill" && el.tagName != "g" ) ? el.parentNode : el, prop == "f" ? "fill" : "stroke") || "#000";
+      const fill = attr((prop == "fill" && el.tagName != "g" ) ? el.parentNode : el, prop == "f" ? "fill" : "stroke") || "rgba(0,0,0,1)";
       if (fill.includes("url")) {
         const id = fill.match(/#([^") ]*)/)[1];
         return F.utils.cssGrad(document.querySelector(`#${id}`));
