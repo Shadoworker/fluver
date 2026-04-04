@@ -7,7 +7,7 @@ const rgba = v => `rgba(${v[0]},${v[1]},${v[2]},${v[3]})`;
 
 const rad = d => ((d % 360) * Math.PI) / 180;
 
-const segmentParameters = { M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, A: 7, Z: 0 };
+const segmentParameters = { M: 2, C: 6, Z: 0 };
 
 const pathHandlers = {
   M(c, p, p0) { p.x = p0.x = c[0]; p.y = p0.y = c[1]; return ['M', p.x, p.y]; },
@@ -435,9 +435,6 @@ class Matrix {
     this.e = e + f * lx - cy * lx; this.f = f + e * ly - cx * ly;
     return this;
   }
-
-  skewX(x, cx, cy) { return this.skew(x, 0, cx, cy); }
-  skewY(y, cx, cy) { return this.skew(0, y, cx, cy); }
 
   toArray() { return [this.a, this.b, this.c, this.d, this.e, this.f]; }
   toString() { return `matrix(${this.a},${this.b},${this.c},${this.d},${this.e},${this.f})`; }
@@ -1361,10 +1358,10 @@ class F {
         const cx = cd ? ox : 0;
         const cy = cd ? oy : 0;
 
-        transform(el, { tx: x - cx, ty: y - cy }, false, true)
+        transform(el, { tx: x - cx, ty: y - cy, ox, oy }, false, true)
 
         if (rd) {
-          transform(el, { ro: angle - transform(el).ro }, true, true);
+          transform(el, { ro: angle - transform(el).ro, ox, oy }, true, true);
         }
       }
      else if (prop in F.__COLORS) {
