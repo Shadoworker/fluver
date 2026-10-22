@@ -1199,12 +1199,32 @@ class F {
             if (!followedPath) return;
             const pathTotalLen = F.utils.getTotLen(followedPath);
 
+            // Position along the path (0-1) reached by this keyframe.
+            const reversed = !!step.p?.vd;
+            const hasProgress = step.p?.pg != null && isFinite(Number(step.p.pg));
+            const endProgress = hasProgress ? Math.max(0, Math.min(1, Number(step.p.pg))) : 1;
+
+            // Continue from the previous keyframe on the same path so their
+            // spacing controls the speed along it.
+            const previousStep = j > 0 ? steps[j - 1] : null;
+            const previousProgress = hasProgress && previousStep
+              && previousStep.v == step.v
+              && (!!previousStep.p?.vd) == reversed
+              && previousStep.p?.pg != null
+              && isFinite(Number(previousStep.p.pg))
+              ? Math.max(0, Math.min(1, Number(previousStep.p.pg)))
+              : null;
+            const startProgress = previousProgress != null ? previousProgress : 0;
+
             finalValue = pathTotalLen;
-            if (!step.p?.vd) runner.from(0);
-            else { runner.from(finalValue); finalValue = 0; }
+            runner.followPathLength = finalValue;
+            runner.followPathStart = reversed ? 1 - startProgress : startProgress;
+            runner.followPathEnd = reversed ? 1 - endProgress : endProgress;
+            runner.from(pathTotalLen * runner.followPathStart);
+            finalValue = pathTotalLen * runner.followPathEnd;
             runner.followedPath = followedPath;
             runner.lutData = F.utils.buildLUT(followedPath);
-            runner.p = { cd: step.p?.cd || false, rd: step.p?.rd || false, vd: step.p?.vd || false };
+            runner.p = { cd: step.p?.cd || false, rd: step.p?.rd || false, vd: reversed };
           } 
           else if (prop in F.__EFFECTS) {
             runner = new Morphable();
@@ -1221,6 +1241,7 @@ class F {
 
           runner.staggered = Array.isArray(g) ? g : false;
           const b = F.EASINGS[step.e] || F.EASINGS.li;
+          if (prop === "fp") runner.followPathLinear = !step.steps && (!step.e || step.e === "li" || step.e === "linear");
           runner.stepper(step.steps ? new Ease(easing.steps(step.steps)) : new Ease(easing.bezier(b[0], b[1], b[2], b[3])));
 
           if (!(F.__TRANSFORMS.includes(prop)) && !(prop in F.__COLORS))
@@ -1354,7 +1375,14 @@ class F {
       val = tween.runner.interpolator(localProgress);
       attr(el, "d", val);
     }else if (prop == "fp") {
-        const { x, y, angle, cd, rd } = F.utils.followVal(tween, localProgress);          
+        const pathLength = tween.runner.followPathLength;
+        const linear = tween.runner.followPathLinear;
+        const startProgress = tween.runner.followPathStart ?? 0;
+        const endProgress = tween.runner.followPathEnd ?? 1;
+        const progress = linear
+          ? startProgress + (endProgress - startProgress) * localProgress
+          : (pathLength > 0 ? val / pathLength : startProgress);
+        const { x, y, angle, cd, rd } = F.utils.followVal(tween, progress);
         const cx = cd ? ox : 0;
         const cy = cd ? oy : 0;
 
