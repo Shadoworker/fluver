@@ -510,7 +510,9 @@ const sizingUtility = {
   el: null, width: null, height: null,
   size(el, width, height) {
     this.el = el; this.width = width; this.height = height;
-    const type = attr(el, 'id').split('-')[1];
+    // The tag, not the id: Awa ids are "<type initial>-<hex>" ("r-1a2b..."), so
+    // id.split('-')[1] was the hex part and no element ever resized
+    const type = String(el.tagName || '').toLowerCase();
     if (type === 'ellipse') {
       this.el.designState = {
         cx: attr(el, 'cx'), cy: attr(el, 'cy'),
@@ -993,9 +995,18 @@ class F {
       }
       return arr;
     },
+    // rgb(a) or hex. Alpha is a fraction (parseInt made 0.5 -> 0, and rgb() -> NaN)
     rgbaToArr(color) {
+      color = String(color || "").trim();
+      if (color[0] === "#") {
+        let h = color.slice(1);
+        if (h.length === 3 || h.length === 4) h = h.split("").map(c => c + c).join("");
+        const n = i => parseInt(h.slice(i, i + 2), 16);
+        return [n(0), n(2), n(4), h.length === 8 ? n(6) / 255 : 1];
+      }
       const rgba = color.replace(/^rgba?\(|\s+|\)$/g, "").split(",");
-      return [parseInt(rgba[0]), parseInt(rgba[1]), parseInt(rgba[2]), parseInt(rgba[3])];
+      const a = parseFloat(rgba[3]);
+      return [parseInt(rgba[0]) || 0, parseInt(rgba[1]) || 0, parseInt(rgba[2]) || 0, isFinite(a) ? a : 1];
     },
     parseGradArr(data) {
       const angle = data[0], stops = [];
@@ -1020,7 +1031,7 @@ class F {
         gradient.set({x1:0.5 + 0.5 * Math.cos(rad), y1:0.5 + 0.5 * Math.sin(rad),x2:0.5 - 0.5 * Math.cos(rad), y2:0.5 - 0.5 * Math.sin(rad)});
       }
       gradient.attachTo(svgOwner.querySelector("defs"));
-      if (_baseColorType === "f") gradient.applyTo(el);
+      if (_baseColorType === "f") gradient.applyTo(_el);
       else gradient.applyTo(_el, "stroke");
     },
     getImageNaturalSize(href) {
@@ -1244,7 +1255,11 @@ class F {
           if (prop === "fp") runner.followPathLinear = !step.steps && (!step.e || step.e === "li" || step.e === "linear");
           runner.stepper(step.steps ? new Ease(easing.steps(step.steps)) : new Ease(easing.bezier(b[0], b[1], b[2], b[3])));
 
-          if (!(F.__TRANSFORMS.includes(prop)) && !(prop in F.__COLORS))
+          // A path stays a path string for the next keyframe: as a value array
+          // "M40 C60 ..." parsed to NaNs and broke every chained morph
+          if (prop === "d") startValue = finalValue;
+          else if (prop === "mo") startValue = runner.toPath.d;
+          else if (!(F.__TRANSFORMS.includes(prop)) && !(prop in F.__COLORS))
             startValue = new runner._morphObj.constructor(runner.to());
           if (prop === "do") runner.dashoffsetLen = F.utils.getTotLen(el);
 
@@ -1397,7 +1412,8 @@ class F {
         const gd = F.utils.parseGradArr(val);
         F.utils.setGradEl(el, ghost, prop, tween.runner.gradientType, gd.angle, gd.stops);
       } else {
-        attr(el, prop, rgba(val));
+        // "f" / "st" are the short keys: the attributes are fill / stroke
+        attr(el, prop === "f" ? "fill" : "stroke", rgba(val));
       }
     } else if (F.__SIZES.includes(prop)) {
       box.width = prop === "w" ? val : box.width;
@@ -1431,7 +1447,7 @@ class F {
       }
     } else if (prop === "mt") {
       const f = val.value[0] === "out" ? ["black", "white"] : ["white", "black"];
-      ghost._maskEl.childNodes.forEach((c, i) => attr(c, "f", i === 0 ? f[0] : f[1]));
+      ghost._maskEl.childNodes.forEach((c, i) => attr(c, "fill", i === 0 ? f[0] : f[1]));
     } else {
       if (prop in F.__STROKE) {
         const p = prop;
@@ -1509,7 +1525,10 @@ class F {
   _initState(el, prop, ghost) {
     if (F.__TRANSFORMS.includes(prop)) return new Matrix(el);
     if (prop in F.__COLORS) {
-      const fill = attr((prop == "fill" && el.tagName != "g" ) ? el.parentNode : el, prop == "f" ? "fill" : "stroke") || "rgba(0,0,0,1)";
+      // An element's own color, else its wrapper's (Awa puts the fill on the wrapper g)
+      const name = prop == "f" ? "fill" : "stroke";
+      const own = attr(el, name);
+      const fill = (own && own !== "none" ? own : (el.tagName != "g" && el.parentNode && attr(el.parentNode, name))) || "rgba(0,0,0,1)";
       if (fill.includes("url")) {
         const id = fill.match(/#([^") ]*)/)[1];
         return F.utils.cssGrad(document.querySelector(`#${id}`));
@@ -1524,7 +1543,7 @@ class F {
       const mask = attr(el.tagName != "g" ? el.parentNode : el, "mask") || "";
       return mask.split("#")[1]?.slice(0, -1) ?? "";
     }
-    if (prop === "mt") return attr(ghost._maskEl.firstChild, "f") === "white" ? "in" : "out";
+    if (prop === "mt") return attr(ghost._maskEl.firstChild, "fill") === "white" ? "in" : "out";
     return attr(el, prop) || 0;
   }
 
