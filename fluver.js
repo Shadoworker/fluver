@@ -1252,8 +1252,11 @@ class F {
 
           runner.staggered = Array.isArray(g) ? g : false;
           const b = F.EASINGS[step.e] || F.EASINGS.li;
-          if (prop === "fp") runner.followPathLinear = !step.steps && (!step.e || step.e === "li" || step.e === "linear");
-          runner.stepper(step.steps ? new Ease(easing.steps(step.steps)) : new Ease(easing.bezier(b[0], b[1], b[2], b[3])));
+          // Held steps: "st" is the exported key (it was never read: visibility / mask
+          // holds interpolated), "cn" the constant easing (holds until the keyframe)
+          const held = step.st || step.steps || (step.e === "cn" ? 1 : 0);
+          if (prop === "fp") runner.followPathLinear = !held && (!step.e || step.e === "li" || step.e === "linear");
+          runner.stepper(held ? new Ease(easing.steps(held)) : new Ease(easing.bezier(b[0], b[1], b[2], b[3])));
 
           // A path stays a path string for the next keyframe: as a value array
           // "M40 C60 ..." parsed to NaNs and broke every chained morph
