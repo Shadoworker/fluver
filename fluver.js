@@ -654,19 +654,55 @@ class PathMorpher {
   }
   // 2. Shift points of shape B to minimize the distance to shape A (Prevents twisting)
   align(a, b) {
-    let bestShift = 0, minDistance = Infinity, n = a.length;
-    for (let s = 0; s < n; s++) {
+    const s = this.bestShift(a, b);
+    return [...b.slice(s), ...b.slice(0, s)];
+  }
+  // Two paths of the same curves (one M, then only C, a closing Z allowed) morph curve by curve, as in
+  // the editor (fluv.js createPathMorph): a closed one from the target's nearest starting curve
+  sameMorph(d1, d2) {
+    const nums = (d) => (d.match(/[+-]?\d*\.?\d+(?:e[+-]?\d+)?/gi) || []).map(Number);
+    // Closed: a Z, or a last point back on M
+    const closed = (d) => { const n = nums(d); return /z\s*$/i.test(d) || (Math.abs(n[n.length - 2] - n[0]) < 1e-6 && Math.abs(n[n.length - 1] - n[1]) < 1e-6); };
+    const cubicOnly = (d) => {
+      const c = d.match(/[a-z]/gi) || [];
+      if (c[0] != "M" || c.length < 2) return false;
+      const body = c.slice(1);
+      if (body[body.length - 1].toUpperCase() == "Z") body.pop();
+      return body.length > 0 && body.every((x) => x == "C") && nums(d).length == 2 + 6 * body.length;
+    };
+    if (!cubicOnly(d1) || !cubicOnly(d2) || closed(d1) != closed(d2)) return null;
+    // The closing Z is a straight curve back to M, written out so it turns with the others
+    const full = (d) => {
+      const n = nums(d), lx = n[n.length - 2], ly = n[n.length - 1];
+      if (!closed(d) || (Math.abs(lx - n[0]) < 1e-6 && Math.abs(ly - n[1]) < 1e-6)) return n;
+      return [...n, lx + (n[0] - lx) / 3, ly + (n[1] - ly) / 3, lx + (2 * (n[0] - lx)) / 3, ly + (2 * (n[1] - ly)) / 3, n[0], n[1]];
+    };
+    const a = full(d1), b = full(d2);
+    if (a.length != b.length) return null;
+    const count = (b.length - 2) / 6, ends = (n) => Array.from({ length: count }, (_, i) => [n[6 + i * 6], n[7 + i * 6]]);
+    const shift = closed(d1) ? this.bestShift(ends(a), ends(b)) : 0;
+    const to = shift ? [b[2 + ((shift - 1) % count) * 6 + 4], b[2 + ((shift - 1) % count) * 6 + 5]] : [b[0], b[1]];
+    for (let i = 0; i < count; i++) to.push(...b.slice(2 + ((i + shift) % count) * 6, 8 + ((i + shift) % count) * 6));
+    return (t) => {
+      const v = a.map((x, i) => x + (to[i] - x) * t);
+      let d = `M${v[0]},${v[1]}`;
+      for (let i = 2; i < v.length; i += 6) d += `C${v[i]},${v[i + 1]} ${v[i + 2]},${v[i + 3]} ${v[i + 4]},${v[i + 5]}`;
+      return d;
+    };
+  }
+  bestShift(a, b) {
+    let best = 0, min = Infinity;
+    for (let s = 0; s < a.length; s++) {
       let dist = 0;
-      for (let i = 0; i < n; i++) {
-        const j = (i + s) % n;
-        dist += (a[i][0] - b[j][0]) ** 2 + (a[i][1] - b[j][1]) ** 2;
-      }
-      if (dist < minDistance) { minDistance = dist; bestShift = s; }
+      for (let i = 0; i < a.length; i++) { const j = (i + s) % a.length; dist += (a[i][0] - b[j][0]) ** 2 + (a[i][1] - b[j][1]) ** 2; }
+      if (dist < min) { min = dist; best = s; }
     }
-    return [...b.slice(bestShift), ...b.slice(0, bestShift)];
+    return best;
   }
   // 3. Generate the actual animation function
   mkMorph(d1, d2) {
+    const same = this.sameMorph(d1, d2);
+    if (same) return same;
     const p1 = this.sample(d1);
     const p2 = this.align(p1, this.sample(d2));
 
@@ -875,9 +911,22 @@ class F {
       }
     },
     
+    // A path hidden by its layer's eye (display: none) still guides: Chrome gives it no CTM of its own (its
+    // parent's, without its transform), so the hidden part's transforms are multiplied in
+    ctmOf(node) {
+      let top = null;
+      for (let n = node; n && n.nodeType == 1 && n !== node.ownerSVGElement; n = n.parentNode) if (getComputedStyle(n).display == "none") top = n;
+      if (!top) return node.getCTM();
+      const chain = [];
+      for (let n = node; ; n = n.parentNode) { chain.unshift(n); if (n === top) break; }
+      let m = top.parentNode.getCTM ? top.parentNode.getCTM() : node.ownerSVGElement.createSVGMatrix();
+      chain.forEach((n) => { const t = n.transform && n.transform.baseVal.consolidate(); if (t) m = m.multiply(t.matrix); });
+      return m;
+    },
+
     buildLUT(pathNode, samples = 1000) {
       const svgRoot = pathNode.ownerSVGElement;
-      const ctm = pathNode.getCTM();
+      const ctm = this.ctmOf(pathNode);
       const totalLen = this.getTotLen(pathNode);
 
       const lut = Array.from({ length: samples + 1 }, (_, i) => {
@@ -1110,7 +1159,8 @@ class F {
       ghost._anchor = an;
 
       const tId = attr(el, "id");
-      ghost._maskEl = document.querySelector(`#${tId}--m--`);
+      // Its mask, when it is a mask source: the editor names it "<id>-m-" (MASK__BASE_ID)
+      ghost._maskEl = document.querySelector(`#${tId}-m-`);
       ghost._transalterersStates = {};
 
       if (hasTransforms && !hastx) {
@@ -1262,8 +1312,10 @@ class F {
           // "M40 C60 ..." parsed to NaNs and broke every chained morph
           if (prop === "d") startValue = finalValue;
           else if (prop === "mo") startValue = runner.toPath.d;
+          // A non-morphable value (mask id, mask type) is carried as is: wrapped again, the
+          // next keyframe read the wrapper itself as its value ("url(#[object Object])")
           else if (!(F.__TRANSFORMS.includes(prop)) && !(prop in F.__COLORS))
-            startValue = new runner._morphObj.constructor(runner.to());
+            startValue = runner._morphObj instanceof NonMorph ? runner.to()[0] : new runner._morphObj.constructor(runner.to());
           if (prop === "do") runner.dashoffsetLen = F.utils.getTotLen(el);
 
           const tween = { el, _ghost: ghost, prop, runner, duration: stepDuration, delay: timings[0] };
