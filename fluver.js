@@ -866,7 +866,7 @@ const pathMorpherIns = new PathMorpher();
 const _imgCache = new Map();
 
 class F {
-  static __TRANSFORMS = ["tx","ty","an","sx","sy","ro","skew"];
+  static __TRANSFORMS = ["tx","ty","an","sx","sy","ro","skew","sk","sky"];
   static __SCALES = ["sx", "sy"];
   static __COLORS = { f: "f", st: "st" };
   static __SIZES = ["w", "h"];
@@ -889,6 +889,14 @@ class F {
   }
 
   static utils = {
+    // An element's design skew, from its "skew" attribute ("x pivotY [y pivotX]"): { x, y, px, py }
+    skewOf(el) { const [x, py, y, px] = String(attr(el, "skew") ?? "").trim().split(/[\s,]+/).map(Number), n = v => isFinite(v) ? v : 0; return { x: n(x), y: n(y), px: n(px), py: n(py) }; },
+    // The matrix without its innermost (local) skew: skewY then skewX around (px, py)
+    unskew(m, s) { const tx = Math.tan(rad(s.x || 0)), ty = Math.tan(rad(s.y || 0)); return new Matrix(m).mulO(new Matrix(1, -ty, -tx, 1 + tx * ty, tx * s.py, ty * s.px - tx * ty * s.py)); },
+    // The matrix with its innermost (local) skew moved from `from` to `to`
+    reskew(m, from, to) { const tx = Math.tan(rad(to.x || 0)), ty = Math.tan(rad(to.y || 0)); return F.utils.unskew(m, from).mulO(new Matrix(1 + tx * ty, ty, tx, 1, -(tx * ty * to.px + tx * to.py), -ty * to.px)); },
+    // An element's rotation, read without its skew (a skew Y tilts the x basis dec() reads)
+    rotOf(el) { return (el._sk?.y ? F.utils.unskew(new Matrix(el), el._sk) : new Matrix(el)).dec().ro; },
     getDist(p1, p2) { return Math.sqrt((p2.x-p1.x)**2 + (p2.y-p1.y)**2); },
     getEllipseLen(el) {
       const a = parseFloat(attr(el, "rx")) || 0;
@@ -1157,6 +1165,7 @@ class F {
       dataAnchor = dataAnchor?.replace(/(\w+)\s*:/g, '"$1":');
       const an = dataAnchor ? [JSON.parse(dataAnchor).x, JSON.parse(dataAnchor).y] : [0.5, 0.5];
       ghost._anchor = an;
+      ghost._skew = ghost._sk = F.utils.skewOf(el); // the design skew in the start matrix (_sk: the one in it now)
 
       const tId = attr(el, "id");
       // Its mask, when it is a mask source: the editor names it "<id>-m-" (MASK__BASE_ID)
@@ -1175,6 +1184,8 @@ class F {
         if (prop === "t" || !data[prop] || !Array.isArray(data[prop])) continue;
         item.animatables[prop] = [];
         let startValue = this._initState(el, prop, ghost);
+        // Rotation and scales read from the matrix without its skew (a skew Y tilts its x basis)
+        if ((prop === "ro" || prop === "sx" || prop === "sy") && ghost._skew.y) startValue = F.utils.unskew(startValue, ghost._skew);
         let startAnchor = ghost._anchor;
         const steps = data[prop];
 
@@ -1195,7 +1206,8 @@ class F {
           runner.p = step.p;
           let finalValue = value;
 
-          if (F.__TRANSFORMS.includes(prop)) {
+          if (prop === "sk" || prop === "sky") startValue = value; // a plain angle, applied inside the matrix (skTransformer)
+          else if (F.__TRANSFORMS.includes(prop)) {
             let val = value - startValue.dec()[prop];
             if (prop === "tx" || prop === "ty") {
               const dx = prop === "tx" ? val : 0, dy = prop === "ty" ? val : 0;
@@ -1412,7 +1424,7 @@ class F {
         transEl()
       };
       const roTransformer = v => {
-        transform(trSrc, { ro: v - transform(trSrc).ro, ox, oy }, true, true);
+        transform(trSrc, { ro: v - F.utils.rotOf(trSrc), ox, oy }, true, true);
         transEl()
       };
       const scaleTransformer = (tsX, tsY) => {
@@ -1420,13 +1432,23 @@ class F {
         transEl()
       };
       const anchorTransform = v => { ghost._anchor = v; };
+      // Skew sits inside the matrix: this frame's starts from the design one (with its skew), unless a follow path
+      // rebuilt it (no skew then). _sk: the skew in it now
+      const skTransformer = (axis, v) => {
+        const from = trSrc._sk || { x: 0, y: 0, px: 0, py: 0 }, to = { x: from.x || 0, y: from.y || 0, px: ox, py: oy };
+        to[axis] = v;
+        attr(trSrc, "transform", F.utils.reskew(new Matrix(trSrc), from, to));
+        trSrc._sk = el._sk = to;
+        transEl();
+      };
 
        
-      if (prop === "tx" && !this._hasTween(elapsedTweens, el, "fp")) { transform(el, val, false, true); transform(ghost, val, false, true); }
+      if (prop === "tx" && !this._hasTween(elapsedTweens, el, "fp")) { transform(el, val, false, true); transform(ghost, val, false, true); el._sk = ghost._sk = ghost._skew; }
       else if (prop === "ty") tyTransformer(val.dec().ty);
       else if (prop === "an") anchorTransform(val);
       else if (F.__SCALES.includes(prop)) scaleTransformer(val.dec().sx, val.dec().sy);
       else if (prop === "ro") roTransformer(val.dec().ro);
+      else if (prop === "sk" || prop === "sky") skTransformer(prop === "sk" ? "x" : "y", Number(val?.value ?? val) || 0);
 
       const transformers = { ty: tyTransformer, an: anchorTransform, sx: scaleTransformer, sy: scaleTransformer, ro: roTransformer };
 
@@ -1457,6 +1479,7 @@ class F {
         const cy = cd ? oy : 0;
 
         transform(el, { tx: x - cx, ty: y - cy, ox, oy }, false, true)
+        el._sk = null; // rebuilt without skew
 
         if (rd) {
           transform(el, { ro: angle - transform(el).ro, ox, oy }, true, true);
@@ -1578,6 +1601,8 @@ class F {
   pause() { this.isPlaying = false; if (this.rafId) cancelAnimationFrame(this.rafId); }
 
   _initState(el, prop, ghost) {
+    if (prop === "sk") return F.utils.skewOf(el).x;
+    if (prop === "sky") return F.utils.skewOf(el).y;
     if (F.__TRANSFORMS.includes(prop)) return new Matrix(el);
     if (prop in F.__COLORS) {
       // An element's own color, else its wrapper's (Awa puts the fill on the wrapper g)
