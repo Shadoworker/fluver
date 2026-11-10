@@ -584,11 +584,13 @@ class PathMorpher {
     const shift = closed(d1) ? this.bestShift(ends(a), ends(b)) : 0;
     const to = shift ? [b[2 + ((shift - 1) % count) * 6 + 4], b[2 + ((shift - 1) % count) * 6 + 5]] : [b[0], b[1]];
     for (let i = 0; i < count; i++) to.push(...b.slice(2 + ((i + shift) % count) * 6, 8 + ((i + shift) % count) * 6));
+    // A closed shape stays closed: without the Z the stroke has two open ends where it starts
+    const z = closed(d1) ? "Z" : "";
     return (t) => {
       const v = a.map((x, i) => x + (to[i] - x) * t);
       let d = `M${v[0]},${v[1]}`;
       for (let i = 2; i < v.length; i += 6) d += `C${v[i]},${v[i + 1]} ${v[i + 2]},${v[i + 3]} ${v[i + 4]},${v[i + 5]}`;
-      return d;
+      return d + z;
     };
   }
   bestShift(a, b) {
@@ -606,6 +608,10 @@ class PathMorpher {
     if (same) return same;
     const p1 = this.sample(d1);
     const p2 = this.align(p1, this.sample(d2));
+    // Both closed: the morph is closed too (the alignment leaves the last sample one step short of the
+    // first: an open path there showed a notch in the stroke)
+    const closed = (d) => { const n = (d.match(/[+-]?\d*\.?\d+(?:e[+-]?\d+)?/gi) || []).map(Number); return /z\s*$/i.test(d) || (Math.abs(n[n.length - 2] - n[0]) < 1e-6 && Math.abs(n[n.length - 1] - n[1]) < 1e-6); };
+    const z = closed(d1) && closed(d2) ? "Z" : "";
 
     // Returns a function that takes 't' (0 to 1)
     return (t) => {
@@ -622,7 +628,7 @@ class PathMorpher {
         const c1x = (prev[0] * 2 + p[0]) / 3, c1y = (prev[1] * 2 + p[1]) / 3;
         const c2x = (prev[0] + p[0] * 2) / 3, c2y = (prev[1] + p[1] * 2) / 3;
         return path + `C${c1x},${c1y} ${c2x},${c2y} ${p[0]},${p[1]}`;
-      }, "");
+      }, "") + z;
     };
   }
 }

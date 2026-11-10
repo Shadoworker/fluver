@@ -198,6 +198,9 @@ to(v) { if (v != null) this._to = this._set(v); }
 at(pos) { return this._obj.init(this._from.map((f, i) => typeof f != "number" ? (pos < 1 ? f : this._to[i]) : f + (this._to[i] - f) * this.ease(pos))); }
 next() { return this._type == NonMorph ? this._to[0] : new this._type().init(this._to); }
 }
+const pathNums = (d) => (d.match(/[+-]?\d*\.?\d+(?:e[+-]?\d+)?/gi) || []).map(Number);
+// Closed: a Z, or a last point back on M
+const isClosed = d => { const n = pathNums(d); return /z\s*$/i.test(d) || (MATH.abs(n[n.length - 2] - n[0]) < 1e-6 && MATH.abs(n[n.length - 1] - n[1]) < 1e-6); };
 class PathMorpher {
 constructor(segments = 128) {
 this.segments = segments;
@@ -217,32 +220,31 @@ const s = this.bestShift(a, b);
 return [...b.slice(s), ...b.slice(0, s)];
 }
 sameMorph(d1, d2) {
-const nums = (d) => (d.match(/[+-]?\d*\.?\d+(?:e[+-]?\d+)?/gi) || []).map(Number);
-const closed = d => { const n = nums(d); return /z\s*$/i.test(d) || (MATH.abs(n[n.length - 2] - n[0]) < 1e-6 && MATH.abs(n[n.length - 1] - n[1]) < 1e-6); };
 const cubicOnly = (d) => {
 const c = d.match(/[a-z]/gi) || [];
 if (c[0] !== "M" || c.length < 2) return false;
 const body = c.slice(1);
 if (body[body.length - 1].toUpperCase() === "Z") body.pop();
-return body.length > 0 && body.every(x => x === "C") && nums(d).length === 2 + 6 * body.length;
+return body.length > 0 && body.every(x => x === "C") && pathNums(d).length === 2 + 6 * body.length;
 };
-if (!cubicOnly(d1) || !cubicOnly(d2) || closed(d1) !== closed(d2)) return null;
+if (!cubicOnly(d1) || !cubicOnly(d2) || isClosed(d1) !== isClosed(d2)) return null;
 const full = (d) => {
-const n = nums(d), lx = n[n.length - 2], ly = n[n.length - 1];
-if (!closed(d) || (MATH.abs(lx - n[0]) < 1e-6 && MATH.abs(ly - n[1]) < 1e-6)) return n;
+const n = pathNums(d), lx = n[n.length - 2], ly = n[n.length - 1];
+if (!isClosed(d) || (MATH.abs(lx - n[0]) < 1e-6 && MATH.abs(ly - n[1]) < 1e-6)) return n;
 return [...n, lx + (n[0] - lx) / 3, ly + (n[1] - ly) / 3, lx + (2 * (n[0] - lx)) / 3, ly + (2 * (n[1] - ly)) / 3, n[0], n[1]];
 };
 const a = full(d1), b = full(d2);
 if (a.length !== b.length) return null;
 const count = (b.length - 2) / 6, ends = (n) => Array.from({ length: count }, (_, i) => [n[6 + i * 6], n[7 + i * 6]]);
-const shift = closed(d1) ? this.bestShift(ends(a), ends(b)) : 0;
+const shift = isClosed(d1) ? this.bestShift(ends(a), ends(b)) : 0;
 const to = shift ? [b[2 + ((shift - 1) % count) * 6 + 4], b[2 + ((shift - 1) % count) * 6 + 5]] : [b[0], b[1]];
 for (let i = 0; i < count; i++) to.push(...b.slice(2 + ((i + shift) % count) * 6, 8 + ((i + shift) % count) * 6));
+const z = isClosed(d1) ? "Z" : ""; // closed stays closed: no open ends in the stroke
 return (t) => {
 const v = a.map((x, i) => x + (to[i] - x) * t);
 let d = `M${v[0]},${v[1]}`;
 for (let i = 2; i < v.length; i += 6) d += `C${v[i]},${v[i + 1]} ${v[i + 2]},${v[i + 3]} ${v[i + 4]},${v[i + 5]}`;
-return d;
+return d + z;
 };
 }
 bestShift(a, b) {
@@ -262,13 +264,15 @@ const same = this.sameMorph(d1, d2);
 if (same) return same;
 const p1 = this.sample(d1);
 const p2 = this.align(p1, this.sample(d2));
+// Both closed: closed (the alignment leaves the last sample one step short of the first)
+const z = isClosed(d1) && isClosed(d2) ? "Z" : "";
 return (t) => {
 const interpolated = p1.map((p, i) => [p[0] + (p2[i][0] - p[0]) * t, p[1] + (p2[i][1] - p[1]) * t]);
 return interpolated.reduce((path, p, i) => {
 if (i === 0) return `M${p[0]},${p[1]}`;
 const prev = interpolated[i - 1];
 return path + `C${(prev[0] * 2 + p[0]) / 3},${(prev[1] * 2 + p[1]) / 3} ${(prev[0] + p[0] * 2) / 3},${(prev[1] + p[1] * 2) / 3} ${p[0]},${p[1]}`;
-}, "");
+}, "") + z;
 };
 }
 }class PathReshaper {
@@ -404,7 +408,7 @@ return { x: n(x), y: n(y), px: n(px), py: n(py) };
 const tans = s => [MATH.tan(rad(s.x || 0)), MATH.tan(rad(s.y || 0))];
 const unskew = (m, s) => { const [tx, ty] = tans(s); return new Matrix(m).mulO(new Matrix(1, -ty, -tx, 1 + tx * ty, tx * s.py, ty * s.px - tx * ty * s.py)); };
 const reskew = (m, from, to) => { const [tx, ty] = tans(to); return unskew(m, from).mulO(new Matrix(1 + tx * ty, ty, tx, 1, -(tx * ty * to.px + tx * to.py), -ty * to.px)); };
-const rotOf = el => (el._sk?.y ? unskew(new Matrix(el), el._sk) : new Matrix(el)).dec().ro;
+const rotOf = (el, m = new Matrix(el)) => (el._sk?.y ? unskew(m, el._sk) : m).dec().ro;
 const getTotLen = el => el.getTotalLength && el.getTotalLength();
 const ctmOf = node => {
 let top = null;
@@ -592,7 +596,7 @@ from = sv;
 runner.from(from);
 runner.to(fin);
 const b = EASINGS[step.e] || EASINGS.li, held = step.st || step.steps || (step.e == "cn" ? 1 : 0);
-if (prop == "fp") runner.followPathLinear = !held && (!step.e || step.e == "li" || step.e == "linear");
+if (prop == "fp") runner.followPathLinear = !held && /^(li(near)?)?$/.test(step.e || ""); // none, "li" or "linear"
 runner.ease = held ? stepsEase(held) : bezier(b[0], b[1]);
 if (prop == "d" || prop == "mo") sv = fin;
 else if (!isTr && !(prop in COLORS)) sv = runner.next();
@@ -681,14 +685,14 @@ if (prop == "do") {
 const changed = [...SIZES, ...SCALES].some(p => p in this.animations.find(a => a.el === el).animatables);
 const len = changed ? getTotLen(el) : runner.dashoffsetLen, da = attr(el, DA);
 val = len * (val / 100);
-if (!da || changed) { if (!da) this.dirtyProperties.add({ el, property: DA }); attr(el, DA, len); }
+if (!da || changed) { if (!da) this.dirtyProperties.add(el); attr(el, DA, len); }
 }
 const tp = STROKE[prop] || prop;
 attr(tp == "op" ? el.parentNode : el, tp == "op" ? "opacity" : tp, val);
 }
 }
 play() {
-this.dirtyProperties.forEach(d => attr(d.el, d.property, null));
+this.dirtyProperties.forEach(d => attr(d, DA, null)); // dash arrays the player added
 this.dirtyProperties.clear();
 this.isPlaying = true;
 if (this.lastElapsed >= this.maxDuration) this.lastElapsed = 0;
@@ -732,9 +736,8 @@ for (const k of ["fp", ...TRANSFORMS, ...SIZES, ...Object.keys(o)]) if (k in o &
 return r;
 }
 _calcStagger(delay, staggerArr, totalElements, index, totalDuration) {
-let [s, r, g] = staggerArr;
-if (typeof s == "string") s = (totalElements * parseInt(s)) / 100;
-if (typeof r == "string") r = (totalElements * parseInt(r)) / 100;
+// "50%": a share of the elements
+const [s, r, g] = staggerArr.map((v, i) => i < 2 && typeof v == "string" ? (totalElements * parseInt(v)) / 100 : v);
 const step = totalDuration * (g / 100);
 const segWidth = step / MATH.round(totalElements / r);
 const relIndex = MATH.floor((index - s) / r);
