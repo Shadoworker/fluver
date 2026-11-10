@@ -3,9 +3,12 @@ const transforms = /\)\s*,?\s*/;
 const delimiter = /[\s,]+/;
 
 const attr = (el, k, v) => v === undefined ? el.getAttribute(k) : el.setAttribute(k, v);
+const svgEl = tag => document.createElementNS("http://www.w3.org/2000/svg", tag);
+// Short local names for what the player calls often (the minifier shortens these, not globals)
+const MATH = Math, isArray = Array.isArray, num = parseFloat, query = (sel) => document.querySelector(sel);
 const rgba = v => `rgba(${v[0]},${v[1]},${v[2]},${v[3]})`;
 
-const rad = d => ((d % 360) * Math.PI) / 180;
+const rad = d => ((d % 360) * MATH.PI) / 180;
 
 const segmentParameters = { M: 2, C: 6, Z: 0 };
 
@@ -96,6 +99,11 @@ function pathParse(d, toAbsolute = true) {
   return parser.segments;
 }
 
+// A "-" right after an "e" is the exponent's sign, not a new number
+function isExponential(parser) {
+  return parser.lastToken.toUpperCase() === 'E';
+}
+
 function isArc(parser) {
   if (!parser.segment.length) return false;
   const len = parser.segment.length;
@@ -109,7 +117,7 @@ function pPath(d = 'M0 0') {
 
 function pPoly(array = [0, 0]) {
   const points = [];
-  if (Array.isArray(array)) array = Array.prototype.concat.apply([], array);
+  if (isArray(array)) array = Array.prototype.concat.apply([], array);
   else array = array.trim().split(delimiter).map(parseFloat);
   if (array.length % 2 !== 0) array.pop();
   for (let i = 0, len = array.length; i < len; i += 2) points.push([array[i], array[i + 1]]);
@@ -125,29 +133,14 @@ function propSize(element, width, height, box) {
   return { width, height };
 }
 
+// Progress is always within 0-1 here (the player clamps it)
 const easing = {
   bezier(x1, y1, x2, y2) {
-    return t => {
-      if (t < 0) return x1 > 0 ? (y1 / x1) * t : x2 > 0 ? (y2 / x2) * t : 0;
-      if (t > 1) return x2 < 1 ? ((1 - y2) / (1 - x2)) * t + (y2 - x2) / (1 - x2)
-        : x1 < 1 ? ((1 - y1) / (1 - x1)) * t + (y1 - x1) / (1 - x1) : 1;
-      return 3 * t * (1 - t) ** 2 * y1 + 3 * t ** 2 * (1 - t) * y2 + t ** 3;
-    };
+    return t => 3 * t * (1 - t) ** 2 * y1 + 3 * t ** 2 * (1 - t) * y2 + t ** 3;
   },
-  steps(steps, stepPosition = "end") {
-    stepPosition = stepPosition.split("-").reverse()[0];
-    let jumps = steps;
-    if (stepPosition === "none") --jumps;
-    else if (stepPosition === "both") ++jumps;
-    return (t, beforeFlag = false) => {
-      let step = Math.floor(t * steps);
-      const jumping = (t * step) % 1 === 0;
-      if (stepPosition === "start" || stepPosition === "both") ++step;
-      if (beforeFlag && jumping) --step;
-      if (t >= 0 && step < 0) step = 0;
-      if (t <= 1 && step > jumps) step = jumps;
-      return step / jumps;
-    };
+  // Jumps at the end of each step (the only kind exports use)
+  steps(steps) {
+    return t => MATH.min(steps, MATH.max(0, MATH.floor(t * steps))) / steps;
   },
 };
 
@@ -155,8 +148,8 @@ class SVGNumber {
   constructor(...args) { this.init(...args); }
 
   init(value, unit) {
-    unit = Array.isArray(value) ? value[1] : unit;
-    value = Array.isArray(value) ? value[0] : value;
+    unit = isArray(value) ? value[1] : unit;
+    value = isArray(value) ? value[0] : value;
     this.value = 0;
     this.unit = unit || "";
 
@@ -165,7 +158,7 @@ class SVGNumber {
     } else if (typeof value === "string") {
       const u = value.match(numberAndUnit);
       if (u) {
-        this.value = parseFloat(u[1]);
+        this.value = num(u[1]);
         if (u[5] === "%") this.value /= 100;
         else if (u[5] === "s") this.value *= 1000;
         this.unit = u[5];
@@ -198,7 +191,7 @@ class SVGArray extends Array {
     return this;
   }
   parse(array = []) {
-    if (Array.isArray(array)) return array;
+    if (isArray(array)) return array;
     return array.trim().split(delimiter).map(parseFloat);
   }
   toArray() { return Array.prototype.concat.apply([], this); }
@@ -214,12 +207,11 @@ const typeOf = value => {
     if (numberAndUnit.test(value)) return SVGNumber;
     else return NonMorph;
   } else if (morphableTypes.indexOf(value.constructor) > -1) return value.constructor;
-  else if (Array.isArray(value)) return SVGArray;
+  else if (isArray(value)) return SVGArray;
 };
 
 class Ease {
   constructor(fn) { this.ease = easing[fn] || fn; }
-  done() { return false; }
   step(from, to, pos) {
     if (typeof from !== "number") return pos < 1 ? from : to;
     return from + (to - from) * this.ease(pos);
@@ -227,7 +219,7 @@ class Ease {
 }
  
 function extend(modules, methods) {
-  modules = Array.isArray(modules) ? modules : [modules];
+  modules = isArray(modules) ? modules : [modules];
   for (let i = modules.length - 1; i >= 0; i--)
     for (const key in methods) modules[i].prototype[key] = methods[key];
 }
@@ -248,7 +240,7 @@ class Point {
   clone() { return new Point(this); }
 
   init(x, y) {
-    const source = Array.isArray(x) ? { x: x[0], y: x[1] }
+    const source = isArray(x) ? { x: x[0], y: x[1] }
       : typeof x === "object" ? { x: x.x, y: x.y }
       : { x, y };
     this.x = source.x ?? 0;
@@ -276,76 +268,15 @@ function mtxify(el) {
     .reduce((matrix, t) => t[0] === "matrix" ? matrix.lmul(Matrix.fromArr(t[1])) : matrix[t[0]].apply(matrix, t[1]), new Matrix());
 }
 
-class Gradient {
-  constructor(type = "linear") {
-    this.type = type;
-    this.id = `grad-${Math.random().toString(36).slice(2, 9)}`;
-    this.stops = [];
-    this.attrs = type === "linear" 
-      ? { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }
-      : { cx: "50%", cy: "50%", r: "50%", fx: "50%", fy: "50%" };
-     
-  }
-
-  // Chainable stop adder
-  addStop(offset, color, opacity = 1) {
-    const off =`${(offset).toFixed(2)}%`;
-    this.stops.push({ offset: off, color, opacity });
-    return this;
-  }
-
-  // Unified setter for linear (from/to) and radial (center/radius)
-  set(props) {
-    Object.assign(this.attrs, props);
-    return this;
-  }
-
-  toElement() {
-    const el = document.createElementNS("http://www.w3.org/2000/svg", this.type + "Gradient");
-    const allAttrs = { id: this.id, gradientUnits: "objectBoundingBox", spreadMethod: "pad", ...this.attrs };
-    
-    for (let key in allAttrs) if (allAttrs[key]) attr(el, key, allAttrs[key]);
-
-    this.stops.forEach(s => {
-      const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
-      attr(stop, "offset", s.offset);
-      attr(stop, "stop-color", s.color);
-      if (s.opacity < 1) attr(stop, "stop-opacity", s.opacity);
-      el.appendChild(stop);
-    });
-
-    return el;
-  }
-
-  attachTo(container) {
-    return container.appendChild(this.toElement());
-  }
-
-  applyTo(el, attrName = "fill") {
-    const target = typeof el === "string" ? document.querySelector(el) : el;
-    attr(target, attrName, `url(#${this.id})`);
-    return this;
-  }
-}
 class Matrix {
   constructor(...args) { this.init(...args); }
 
+  // The options the player passes: translate / tx / ty, scale / sx / sy, ro, and the pivot (ox, oy)
   static fmtTx(o) {
-    const flipBoth = o.flip === "both" || o.flip === true;
-    const flipX = o.flip && (flipBoth || o.flip === "x") ? -1 : 1;
-    const flipY = o.flip && (flipBoth || o.flip === "y") ? -1 : 1;
-    const skewX = o.skew?.length ? o.skew[0] : isFinite(o.skew) ? o.skew : isFinite(o.skewX) ? o.skewX : 0;
-    const skewY = o.skew?.length ? o.skew[1] : isFinite(o.skew) ? o.skew : isFinite(o.skewY) ? o.skewY : 0;
-    const sx = o.scale?.length ? o.scale[0] * flipX : isFinite(o.scale) ? o.scale * flipX : isFinite(o.sx) ? o.sx * flipX : flipX;
-    const sy = o.scale?.length ? o.scale[1] * flipY : isFinite(o.scale) ? o.scale * flipY : isFinite(o.sy) ? o.sy * flipY : flipY;
-    const shear = o.shear || 0, theta = o.ro || o.theta || 0;
-    const origin = new Point(o.origin || o.around || o.ox || o.originX, o.oy || o.originY);
-    const position = new Point(o.position || o.px || o.positionX || NaN, o.py || o.positionY || NaN);
-    const translate = new Point(o.translate || o.tx || o.tx, o.ty || o.ty);
-    const relative = new Point(o.relative || o.rx || o.relativeX, o.ry || o.relativeY);
-    return { sx, sy, skewX, skewY, shear, theta,
-      rx: relative.x, ry: relative.y, tx: translate.x, ty: translate.y,
-      ox: origin.x, oy: origin.y, px: position.x, py: position.y };
+    const pick = (v, i, alt, def) => v?.length ? v[i] : isFinite(v) ? v : isFinite(alt) ? alt : def;
+    const origin = new Point(o.ox, o.oy), translate = new Point(o.translate || o.tx, o.ty);
+    return { sx: pick(o.scale, 0, o.sx, 1) * 1, sy: pick(o.scale, 1, o.sy, 1) * 1,
+      theta: o.ro || 0, tx: translate.x, ty: translate.y, ox: origin.x, oy: origin.y };
   }
 
   static fromArr(a) { return { a: a[0], b: a[1], c: a[2], d: a[3], e: a[4], f: a[5] }; }
@@ -365,9 +296,9 @@ class Matrix {
   dec(cx = 0, cy = 0) {
     const { a, b, c, d, e, f } = this;
     const det = a * d - b * c, ccw = det > 0 ? 1 : -1;
-    const sx = ccw * Math.sqrt(a * a + b * b);
-    const thetaRad = Math.atan2(ccw * b, ccw * a), theta = (180 / Math.PI) * thetaRad;
-    const ct = Math.cos(thetaRad), st = Math.sin(thetaRad);
+    const sx = ccw * MATH.sqrt(a * a + b * b);
+    const thetaRad = MATH.atan2(ccw * b, ccw * a), theta = (180 / MATH.PI) * thetaRad;
+    const ct = MATH.cos(thetaRad), st = MATH.sin(thetaRad);
     const lam = (a * c + b * d) / det;
     const sy = (c * sx) / (lam * a - b) || (d * sx) / (lam * b + a);
     const tx = e - cx + cx * ct * sx + cy * (lam * ct * sx - st * sy);
@@ -380,7 +311,7 @@ class Matrix {
     const base = Matrix.fromArr([1, 0, 0, 1, 0, 0]);
     source = source instanceof Element ? mtxify(source)
       : typeof source === "string" ? Matrix.fromArr(source.split(delimiter).map(parseFloat))
-      : Array.isArray(source) ? Matrix.fromArr(source)
+      : isArray(source) ? Matrix.fromArr(source)
       : typeof source === "object" && Matrix.isMx(source) ? source
       : typeof source === "object" ? new Matrix().transform(source)
       : arguments.length === 6 ? Matrix.fromArr([].slice.call(arguments))
@@ -403,7 +334,7 @@ class Matrix {
  
   rotO(r, cx = 0, cy = 0) {
     r = rad(r);
-    const cos = Math.cos(r), sin = Math.sin(r), { a, b, c, d, e, f } = this;
+    const cos = MATH.cos(r), sin = MATH.sin(r), { a, b, c, d, e, f } = this;
     this.a = a * cos - b * sin; this.b = b * cos + a * sin;
     this.c = c * cos - d * sin; this.d = d * cos + c * sin;
     this.e = e * cos - f * sin + cy * sin - cx * cos + cx;
@@ -419,23 +350,6 @@ class Matrix {
     return this;
   }
  
-  shrO(lx, cx = 0, cy = 0) {
-    const { a, b, c, d, e, f } = this;
-    this.a = a + b * lx; this.c = c + d * lx; this.e = e + f * lx - cy * lx;
-    return this;
-  }
-
-  skew() { return this.clone().skwO(...arguments); }
-  skwO(x, y = x, cx = 0, cy = 0) {
-    if (arguments.length === 3) { cy = cx; cx = y; y = x; }
-    x = rad(x); y = rad(y);
-    const lx = Math.tan(x), ly = Math.tan(y), { a, b, c, d, e, f } = this;
-    this.a = a + b * lx; this.b = b + a * ly;
-    this.c = c + d * lx; this.d = d + c * ly;
-    this.e = e + f * lx - cy * lx; this.f = f + e * ly - cx * ly;
-    return this;
-  }
-
   toArray() { return [this.a, this.b, this.c, this.d, this.e, this.f]; }
   toString() { return `matrix(${this.a},${this.b},${this.c},${this.d},${this.e},${this.f})`; }
 
@@ -443,18 +357,9 @@ class Matrix {
     if (Matrix.isMx(o)) return new Matrix(o).mulO(this);
     const t = Matrix.fmtTx(o);
     const { x: ox, y: oy } = new Point(t.ox, t.oy).transform(this);
-    const transformer = new Matrix()
-      .txO(t.rx, t.ry).lmulO(this).txO(-ox, -oy)
-      .sclO(t.sx, t.sy).skwO(t.skewX, t.skewY).shrO(t.shear)
-      .rotO(t.theta).txO(ox, oy);
-    if (isFinite(t.px) || isFinite(t.py)) {
-      const origin = new Point(ox, oy).transform(transformer);
-      transformer.txO(isFinite(t.px) ? t.px - origin.x : 0, isFinite(t.py) ? t.py - origin.y : 0);
-    }
-    transformer.txO(t.tx, t.ty);
-    return transformer;
+    return new Matrix().lmulO(this).txO(-ox, -oy).sclO(t.sx, t.sy).rotO(t.theta).txO(ox, oy).txO(t.tx, t.ty);
   }
- 
+
   txO(x, y) { this.e += x || 0; this.f += y || 0; return this; }
 }
 
@@ -613,14 +518,10 @@ class Morphable {
 
   at(pos) { return this._morphObj.morph(this._from, this._to, pos, this._stepper, this._context); }
 
-  done() {
-    return this._context.map(this._stepper.done).reduce((last, curr) => last && curr, true);
-  }
-
   from(val) { if (val == null) return this._from; this._from = this._set(val); return this; }
-  stepper(stepper) { if (stepper == null) return this._stepper; this._stepper = stepper; return this; }
+  stepper(stepper) { this._stepper = stepper; return this; }
   to(val) { if (val == null) return this._to; this._to = this._set(val); return this; }
-  type(type) { if (type == null) return this._type; this._type = type; return this; }
+  type(type) { this._type = type; return this; }
 
   _set(value) {
     if (!this._type) this.type(typeOf(value));
@@ -866,7 +767,7 @@ const pathMorpherIns = new PathMorpher();
 const _imgCache = new Map();
 
 class F {
-  static __TRANSFORMS = ["tx","ty","an","sx","sy","ro","skew","sk","sky"];
+  static __TRANSFORMS = ["tx","ty","an","sx","sy","ro","sk","sky"];
   static __SCALES = ["sx", "sy"];
   static __COLORS = { f: "f", st: "st" };
   static __SIZES = ["w", "h"];
@@ -874,7 +775,6 @@ class F {
   static __STROKE = { sw: "stroke-width", da: "stroke-dasharray", do: "stroke-dashoffset" };
   static __EFFECTS = { "ex": "ex", "ey": "ey", "eb": "eb", "ec": "ec" };
 
-  static __GEOM_MODIFIERS = ["d", "points", "text"];
   static EASINGS = {
     li:   [0.0,0.0,1.0,1.0],
     iq:   [0.55,0.085,0.68,0.53],   oq:   [0.25,0.46,0.45,0.94],    ioq:  [0.455,0.03,0.515,0.955],
@@ -892,32 +792,13 @@ class F {
     // An element's design skew, from its "skew" attribute ("x pivotY [y pivotX]"): { x, y, px, py }
     skewOf(el) { const [x, py, y, px] = String(attr(el, "skew") ?? "").trim().split(/[\s,]+/).map(Number), n = v => isFinite(v) ? v : 0; return { x: n(x), y: n(y), px: n(px), py: n(py) }; },
     // The matrix without its innermost (local) skew: skewY then skewX around (px, py)
-    unskew(m, s) { const tx = Math.tan(rad(s.x || 0)), ty = Math.tan(rad(s.y || 0)); return new Matrix(m).mulO(new Matrix(1, -ty, -tx, 1 + tx * ty, tx * s.py, ty * s.px - tx * ty * s.py)); },
+    unskew(m, s) { const tx = MATH.tan(rad(s.x || 0)), ty = MATH.tan(rad(s.y || 0)); return new Matrix(m).mulO(new Matrix(1, -ty, -tx, 1 + tx * ty, tx * s.py, ty * s.px - tx * ty * s.py)); },
     // The matrix with its innermost (local) skew moved from `from` to `to`
-    reskew(m, from, to) { const tx = Math.tan(rad(to.x || 0)), ty = Math.tan(rad(to.y || 0)); return F.utils.unskew(m, from).mulO(new Matrix(1 + tx * ty, ty, tx, 1, -(tx * ty * to.px + tx * to.py), -ty * to.px)); },
+    reskew(m, from, to) { const tx = MATH.tan(rad(to.x || 0)), ty = MATH.tan(rad(to.y || 0)); return F.utils.unskew(m, from).mulO(new Matrix(1 + tx * ty, ty, tx, 1, -(tx * ty * to.px + tx * to.py), -ty * to.px)); },
     // An element's rotation, read without its skew (a skew Y tilts the x basis dec() reads)
     rotOf(el) { return (el._sk?.y ? F.utils.unskew(new Matrix(el), el._sk) : new Matrix(el)).dec().ro; },
-    getDist(p1, p2) { return Math.sqrt((p2.x-p1.x)**2 + (p2.y-p1.y)**2); },
-    getEllipseLen(el) {
-      const a = parseFloat(attr(el, "rx")) || 0;
-      const b = parseFloat(attr(el, "ry")) || 0;
-      return Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
-    },
-    getRectLen(el) { return attr(el, "width") * 2 + attr(el, "height") * 2; },
-    getPolygonLen(el) {
-      const pts = el.points, n = pts.numberOfItems;
-      let len = 0;
-      for (let i = 0; i < n - 1; i++) len += F.utils.getDist(pts.getItem(i), pts.getItem(i + 1));
-      return len + F.utils.getDist(pts.getItem(n - 1), pts.getItem(0));
-    },
-    getTotLen(el) {
-      if (el.getTotalLength) return el.getTotalLength();
-      switch (el.type) {
-        case "ellipse": return F.utils.getEllipseLen(el);
-        case "rect": return F.utils.getRectLen(el);
-        case "polygon": return F.utils.getPolygonLen(el);
-      }
-    },
+    // Every shape has getTotalLength in today's browsers (the old per-shape fallbacks read el.type, which SVG elements don't have)
+    getTotLen(el) { return el.getTotalLength && el.getTotalLength(); },
     
     // A path hidden by its layer's eye (display: none) still guides: Chrome gives it no CTM of its own (its
     // parent's, without its transform), so the hidden part's transforms are multiplied in
@@ -947,14 +828,14 @@ class F {
       const arcLengths = lut.reduce((acc, p, i) => {
         if (i === 0) return [0];
         const dx = p.x - lut[i-1].x, dy = p.y - lut[i-1].y;
-        return [...acc, acc[i-1] + Math.sqrt(dx*dx + dy*dy)];
+        return [...acc, acc[i-1] + MATH.sqrt(dx*dx + dy*dy)];
       }, []);
 
       return { lut, arcLengths, total: arcLengths.at(-1) };
     },
 
     sampleLUT({ lut, arcLengths, total }, t) {
-      const target = Math.max(0, Math.min(1, t)) * total;
+      const target = MATH.max(0, MATH.min(1, t)) * total;
       let lo = 0, hi = lut.length - 1;
       while (lo < hi - 1) {
         const mid = (lo + hi) >> 1;
@@ -981,7 +862,7 @@ class F {
       const screenPt = this.sampleLUT(runner.lutData, progress);
 
       // Angle in screen space
-      let angle = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
+      let angle = MATH.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / MATH.PI;
     
       // Convert screen → parent local space
       const targetParent = el.parentNode;
@@ -996,7 +877,7 @@ class F {
       // Subtract parent's own rotation from screen angle
       // so the element ros relative to its parent space, not screen
       if (rd && parentCTM) {
-        const parentAngle = Math.atan2(parentCTM.b, parentCTM.a) * 180 / Math.PI;
+        const parentAngle = MATH.atan2(parentCTM.b, parentCTM.a) * 180 / MATH.PI;
         angle = angle - parentAngle;
       }
 
@@ -1005,7 +886,7 @@ class F {
  
     cssGrad(el) {
       const isRadial = el.tagName === "radialGradient";
-      const toPercent = v => v.includes("%") ? v : parseFloat(v) * 100 + "%";
+      const toPercent = v => v.includes("%") ? v : num(v) * 100 + "%";
 
       const stops = Array.from(el.querySelectorAll("stop")).map(s => {
         const offset = toPercent(attr(s, "offset") || "0");
@@ -1014,8 +895,8 @@ class F {
 
       if (isRadial) return `radial-gradient(circle, ${stops})`;
 
-      const [x1, y1, x2, y2] = ["x1","y1","x2","y2"].map(k => parseFloat(attr(el, k) || 0));
-      const angle = ((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI + 90) % 360;
+      const [x1, y1, x2, y2] = ["x1","y1","x2","y2"].map(k => num(attr(el, k) || 0));
+      const angle = ((MATH.atan2(y2 - y1, x2 - x1) * 180) / MATH.PI + 90) % 360;
       return `linear-gradient(${angle.toFixed(0)}deg, ${stops})`;
     },
     isText(_el) { return _el.nodeName === "text"; },
@@ -1062,7 +943,7 @@ class F {
         return [n(0), n(2), n(4), h.length === 8 ? n(6) / 255 : 1];
       }
       const rgba = color.replace(/^rgba?\(|\s+|\)$/g, "").split(",");
-      const a = parseFloat(rgba[3]);
+      const a = num(rgba[3]);
       return [parseInt(rgba[0]) || 0, parseInt(rgba[1]) || 0, parseInt(rgba[2]) || 0, isFinite(a) ? a : 1];
     },
     parseGradArr(data) {
@@ -1071,25 +952,26 @@ class F {
         stops.push({ color: `rgba(${data[i]},${data[i+1]},${data[i+2]},${data[i+3]})`, offset: data[i+4] });
       return { angle, stops };
     },
-    setGradEl(_el, _ghost, _baseColorType = null, _gradientType = null, _gradientAngle = null, _stopPoints = null) {
-      const _elemId = attr(_el, "id");
-      const gradientId = `${_elemId}-gr-i-${_baseColorType}`;
-      const existing = document.querySelector(`#${gradientId}`);
-      if (existing) existing.remove();
-
-      const gradient = new Gradient(_gradientType);
-      gradient.id = gradientId;
-      const svgOwner = _el.ownerSVGElement;
-
-      for (const _vals of _stopPoints) gradient.addStop(_vals.offset, _vals.color);
-
-      if (_gradientType === "linear") {
-        const rad = ((parseInt(_gradientAngle) + 90) * Math.PI) / 180;
-        gradient.set({x1:0.5 + 0.5 * Math.cos(rad), y1:0.5 + 0.5 * Math.sin(rad),x2:0.5 - 0.5 * Math.cos(rad), y2:0.5 - 0.5 * Math.sin(rad)});
+    // The gradient a color step is drawn with (linear: by its angle; radial: centred)
+    setGradEl(el, ghost, baseColorType = null, gradientType = null, gradientAngle = null, stopPoints = null) {
+      const id = `${attr(el, "id")}-gr-i-${baseColorType}`;
+      query(`#${id}`)?.remove();
+      const g = svgEl(gradientType + "Gradient");
+      let at = { cx: "50%", cy: "50%", r: "50%", fx: "50%", fy: "50%" };
+      if (gradientType === "linear") {
+        const r = ((parseInt(gradientAngle) + 90) * MATH.PI) / 180;
+        at = { x1: 0.5 + 0.5 * MATH.cos(r), y1: 0.5 + 0.5 * MATH.sin(r), x2: 0.5 - 0.5 * MATH.cos(r), y2: 0.5 - 0.5 * MATH.sin(r) };
       }
-      gradient.attachTo(svgOwner.querySelector("defs"));
-      if (_baseColorType === "f") gradient.applyTo(_el);
-      else gradient.applyTo(_el, "stroke");
+      at = { id, gradientUnits: "objectBoundingBox", spreadMethod: "pad", ...at };
+      for (const k in at) if (at[k]) attr(g, k, at[k]);
+      for (const s of stopPoints) {
+        const stop = svgEl("stop");
+        attr(stop, "offset", `${s.offset.toFixed(2)}%`);
+        attr(stop, "stop-color", s.color);
+        g.appendChild(stop);
+      }
+      el.ownerSVGElement.querySelector("defs").appendChild(g);
+      attr(el, baseColorType === "f" ? "fill" : "stroke", `url(#${id})`);
     },
     getImageNaturalSize(href) {
       if (_imgCache.has(href)) return Promise.resolve(_imgCache.get(href));
@@ -1103,28 +985,15 @@ class F {
         img.src = href;
       });
     },
-    async updateImg(el, imgRealWidth = null, imgRealHeight = null, renderMode = "FILL", tile = 4, hspace = 0, vspace = 0) {
-      const imagePattern = document.querySelector(`#${attr(el, 'id')}-p-bg`);
-      const imagePatternImage = imagePattern.firstChild;
-      
-      // If dimensions were passed (draw drag case), skip image load entirely
-      if (!imgRealWidth || !imgRealHeight) { const size = await this.getImageNaturalSize(imageContent); imgRealWidth = size.w; imgRealHeight = size.h;}
-      const elemX = parseFloat(attr(el, 'x')), elemY = parseFloat(attr(el, 'y'));
-      const { width: elemWidth, height: elemHeight } = el.getBBox();
-      const setAttrs = (node, attrs) => Object.entries(attrs).forEach(([k, v]) => attr(node, k, v));
-      if (renderMode === "FILL" || renderMode === "FIT") {
-        const isFill = renderMode === "FILL";
-        const wRatio = elemWidth / imgRealWidth, hRatio = elemHeight / imgRealHeight;
-        const scaler = (imgRealWidth > imgRealHeight) === isFill ? hRatio : wRatio;
-        const newW = imgRealWidth * scaler, newH = imgRealHeight * scaler;
-        setAttrs(imagePattern, { width: imgRealWidth, height: imgRealHeight, x: elemX + (elemWidth - newW) / 2, y: elemY + (elemHeight - newH) / 2 });
-        setAttrs(imagePatternImage, { width: imgRealWidth, height: imgRealHeight, transform: `scale(${scaler})` });
-      } else if (renderMode === "TILE") {
-        if (tile < 1) return;
-        const tileW = imgRealWidth / (100 - tile) * 5, tileH = imgRealHeight / (100 - tile) * 5;
-        setAttrs(imagePattern, { width: tileW + (elemWidth - tileW) * (hspace / 100), height: tileH + (elemHeight - tileH) * (vspace / 100), baseWidth: imgRealWidth, baseHeight: imgRealHeight, hSpacing: hspace, vSpacing: vspace, x: elemX, y: elemY });
-        setAttrs(imagePatternImage, { width: tileW, height: tileH });
-      }
+    // An image element's pattern, fitted to cover it. The player passes the element's size; without one
+    // (a size animated through 0) the image's own size is loaded
+    async updateImg(el, iw = null, ih = null) {
+      const pattern = query(`#${attr(el, 'id')}-p-bg`), img = pattern.firstChild;
+      if (!iw || !ih) ({ w: iw, h: ih } = await this.getImageNaturalSize(attr(img, "href") || attr(img, "xlink:href")));
+      const x = num(attr(el, 'x')), y = num(attr(el, 'y')), { width: w, height: h } = el.getBBox();
+      const k = iw > ih ? h / ih : w / iw;
+      [[pattern, { width: iw, height: ih, x: x + (w - iw * k) / 2, y: y + (h - ih * k) / 2 }], [img, { width: iw, height: ih, transform: `scale(${k})` }]]
+        .forEach(([node, o]) => { for (const key in o) attr(node, key, o[key]); });
     }
   };
 
@@ -1132,10 +1001,7 @@ class F {
     this.animations = [];
     this._allTweens = [];
     this.config = {
-      duration: null,
-      speed: options.speed || 1,
       loop: options.loop || false,
-      autoplay: options.autoplay ?? false,
       onUpdate: options.update || null,
       onComplete: options.complete || null,
     };
@@ -1143,8 +1009,6 @@ class F {
     this.lastElapsed = 0;
     this.rafId = null;
     this.isPlaying = false;
-    this.isCompleted = false;
-    this.progress = 0;
     this.dirtyProperties = new Set();
   }
 
@@ -1153,10 +1017,8 @@ class F {
     const elements = document.querySelectorAll(data.t) ?? [];
     const hasTransforms = this._objectHasProps(data, F.__TRANSFORMS);
     const hastx = this._objectHasProps(data, ["tx"]);
-    const elementAnimationDuration = this._getElAnimDur(data);
 
     elements.forEach((el, i) => {
-      const snapshot = el.cloneNode(true);
       const ghost = el.cloneNode();
       ghost._bbox = el.getBBox();
       ghost.getBBox = () => ghost._bbox;
@@ -1169,19 +1031,19 @@ class F {
 
       const tId = attr(el, "id");
       // Its mask, when it is a mask source: the editor names it "<id>-m-" (MASK__BASE_ID)
-      ghost._maskEl = document.querySelector(`#${tId}-m-`);
+      ghost._maskEl = query(`#${tId}-m-`);
       ghost._transalterersStates = {};
 
       if (hasTransforms && !hastx) {
-        data["tx"] = [{ value: transform(snapshot).tx, duration: elementAnimationDuration }];
+        data.tx = [{}]; // holds the position: its old value / duration keys were never read (steps use v / d)
         data = this._reorder(data);
         ghost._statictx = true;
       }
 
-      const item = { el, t: data.t, _ghost: ghost, _snapshot: snapshot, animatables: {} };
+      const item = { el, t: data.t, _ghost: ghost, animatables: {} };
 
       for (const prop in data) {
-        if (prop === "t" || !data[prop] || !Array.isArray(data[prop])) continue;
+        if (prop === "t" || !data[prop] || !isArray(data[prop])) continue;
         item.animatables[prop] = [];
         let startValue = this._initState(el, prop, ghost);
         // Rotation and scales read from the matrix without its skew (a skew Y tilts its x basis)
@@ -1194,7 +1056,7 @@ class F {
           const value = step.v;
           const g = step.s;
 
-          const timings = Array.isArray(g)
+          const timings = isArray(g)
             ? this._calcStagger(step.w || 0, g, elements.length, i, step.d)
             : [step.w || 0, 0];
 
@@ -1244,14 +1106,14 @@ class F {
             runner = new Morphable();
             const diff = finalValue.length - startValue.length;
             if (diff > 0) startValue = [...startValue, ...new Array(diff).fill(startValue.at(-1))];
-            else finalValue = [...finalValue, ...new Array(Math.abs(diff)).fill(finalValue.at(-1))];
+            else finalValue = [...finalValue, ...new Array(MATH.abs(diff)).fill(finalValue.at(-1))];
             startValue = startValue.map(e => parseInt(e));
             finalValue = finalValue.map(e => parseInt(e));
             runner.from(startValue);
           } else if (prop === "mo") {
             const toPathSelector = finalValue;
-            const fromPath = step.p?.rp ? attr(el, "d") : Array.isArray(startValue) ? startValue.toString() : startValue;
-            const toPathEl = document.querySelector(toPathSelector);
+            const fromPath = step.p?.rp ? attr(el, "d") : isArray(startValue) ? startValue.toString() : startValue;
+            const toPathEl = query(toPathSelector);
             if (!toPathEl) return;
             runner.fromPath = { d: fromPath };
             runner.toPath = { d: attr(toPathEl, "d") };
@@ -1264,18 +1126,18 @@ class F {
             runner.interpolator = pathMorpherIns.mkMorph(runner.fromPath.d, runner.toPath.d);
             finalValue = runner.toPath.d;
           } else if (prop === "d") {
-            startValue = Array.isArray(startValue) ? startValue.toString() : startValue;
+            startValue = isArray(startValue) ? startValue.toString() : startValue;
             const reshapResult = new PathReshaper().reshape(startValue, finalValue);
             runner.interpolator = pathMorpherIns.mkMorph(reshapResult[0], reshapResult[1]);
           } else if (prop === "fp") {
-            const followedPath = document.querySelector(finalValue);
+            const followedPath = query(finalValue);
             if (!followedPath) return;
             const pathTotalLen = F.utils.getTotLen(followedPath);
 
             // Position along the path (0-1) reached by this keyframe.
             const reversed = !!step.p?.vd;
             const hasProgress = step.p?.pg != null && isFinite(Number(step.p.pg));
-            const endProgress = hasProgress ? Math.max(0, Math.min(1, Number(step.p.pg))) : 1;
+            const endProgress = hasProgress ? MATH.max(0, MATH.min(1, Number(step.p.pg))) : 1;
 
             // Continue from the previous keyframe on the same path so their
             // spacing controls the speed along it.
@@ -1285,7 +1147,7 @@ class F {
               && (!!previousStep.p?.vd) == reversed
               && previousStep.p?.pg != null
               && isFinite(Number(previousStep.p.pg))
-              ? Math.max(0, Math.min(1, Number(previousStep.p.pg)))
+              ? MATH.max(0, MATH.min(1, Number(previousStep.p.pg)))
               : null;
             const startProgress = previousProgress != null ? previousProgress : 0;
 
@@ -1303,7 +1165,7 @@ class F {
             runner = new Morphable();
             const { es, fs, fp } = step.p;
             runner.p = step.p;
-            const effectEl = document.querySelector(`${es}`);
+            const effectEl = query(`${es}`);
             const propertyHandlerEl = effectEl?.querySelector(fs);
             if (propertyHandlerEl && startValue == null) startValue = attr(propertyHandlerEl, fp);
             runner.from(startValue);
@@ -1312,7 +1174,7 @@ class F {
           if (prop === "an") runner.to(value);
           else runner.to(finalValue);
 
-          runner.staggered = Array.isArray(g) ? g : false;
+          runner.staggered = isArray(g) ? g : false;
           const b = F.EASINGS[step.e] || F.EASINGS.li;
           // Held steps: "st" is the exported key (it was never read: visibility / mask
           // holds interpolated), "cn" the constant easing (holds until the keyframe)
@@ -1338,7 +1200,6 @@ class F {
     });
 
     this._compile();
-    if (this.config.autoplay) this.play();
     return this;
   }
 
@@ -1349,19 +1210,10 @@ class F {
       for (const prop in anim.animatables)
         for (const tw of anim.animatables[prop]) {
           tweens.push(tw);
-          calcMax = Math.max(calcMax, (tw.delay || 0) + (tw.duration || 0));
+          calcMax = MATH.max(calcMax, (tw.delay || 0) + (tw.duration || 0));
         }
     this._allTweens = tweens;
-    this.maxDuration = this.config.duration || calcMax;
-  }
-
-  _getElAnimDur(data) {
-    const durations = [];
-    for (const prop in data) {
-      if (prop === "t" || !data[prop] || !Array.isArray(data[prop])) continue;
-      data[prop].forEach(kf => durations.push((kf.duration || 0) + (kf.delay || 0)));
-    }
-    return Math.min(0, Math.max(...durations));
+    this.maxDuration = calcMax;
   }
 
   _objectHasProps(data, props) { return props.some(prop => prop in data); }
@@ -1390,13 +1242,7 @@ class F {
   _render(elapsed) {
     const elapsedTweens = this._elapsed(elapsed);
     for (const tween of elapsedTweens) {
-      if (this.fullReset && tween.runner.staggered) {
-        if (!tween.delayTemp) tween.delayTemp = tween.delay;
-        tween.delay = 0;
-      } else if (!this.fullReset && tween.delayTemp) {
-        tween.delay = tween.delayTemp;
-      }
-      let localProgress = Math.max(0, Math.min(1, (elapsed - tween.delay) / (tween.duration || 1)));
+      let localProgress = MATH.max(0, MATH.min(1, (elapsed - tween.delay) / (tween.duration || 1)));
       this._animate(tween, elapsedTweens, localProgress);
     }
   }
@@ -1499,11 +1345,11 @@ class F {
       if (F.utils.isText(el)) attr(el, "font-size", val);
       else {
         sizingUtility.size(el, box.width, box.height);
-        if (F.utils.isMedia(el)) updateImg(el, box.width, box.height);
+        if (F.utils.isMedia(el)) F.utils.updateImg(el, box.width, box.height);
       }
     } else if (prop in F.__EFFECTS) {
       const { es, fs, fp } = tween.runner.p;
-      const effectEl = document.querySelector(`${es}`);
+      const effectEl = query(`${es}`);
       const propertyHandlerEl = effectEl?.querySelector(fs);
       if (propertyHandlerEl) {
         if (prop === "ec" && fp === "flood-color")
@@ -1548,10 +1394,6 @@ class F {
       attr((prop == "op" ? el.parentNode : el), prop == "op" ? "opacity" : prop, val);
     }
 
-    if (F.__GEOM_MODIFIERS.includes(prop) && F.utils.isMedia(el)) {
-      attr(tween._ghost, prop, val);
-      tween._ghost._bbox = box;
-    }
   }
 
   _cleanDirtyProps() {
@@ -1559,39 +1401,33 @@ class F {
     this.dirtyProperties.clear();
   }
 
-  play(direction = 1) {
-    // this.pause();
+  play() {
     this._cleanDirtyProps();
     this.isPlaying = true;
-    this.isCompleted = false;
-    if (direction === 1 && this.lastElapsed >= this.maxDuration) this.lastElapsed = 0;
-    if (direction === -1 && this.lastElapsed <= 0) this.lastElapsed = this.maxDuration;
+    if (this.lastElapsed >= this.maxDuration) this.lastElapsed = 0;
 
     let startTime = null;
     const initialElapsed = this.lastElapsed;
     const tick = now => {
       if (!startTime) startTime = now;
-      const progressDelta = (now - startTime) * this.config.speed;
-      let elapsed = direction === 1 ? initialElapsed + progressDelta : initialElapsed - progressDelta;
+      const elapsed = initialElapsed + (now - startTime);
 
-      if (elapsed > this.maxDuration || elapsed < 0) {
+      if (elapsed > this.maxDuration) {
         if (this.config.loop) {
-          this.lastElapsed = elapsed > this.maxDuration ? 0 : this.maxDuration;
+          this.lastElapsed = 0;
           startTime = now;
-          this.play(direction);
+          this.play();
         } else {
-          this.lastElapsed = elapsed > this.maxDuration ? this.maxDuration : 0;
+          this.lastElapsed = this.maxDuration;
           this._render(this.lastElapsed);
           if (this.config.onComplete) this.config.onComplete();
           this.pause();
-          if (this.lastElapsed === this.maxDuration) this.isCompleted = true;
         }
         return;
       }
 
       this.lastElapsed = elapsed;
       this._render(elapsed);
-      this.progress = (elapsed / this.maxDuration) * 100;
       if (this.config.onUpdate) this.config.onUpdate();
       this.rafId = requestAnimationFrame(tick);
     };
@@ -1611,7 +1447,7 @@ class F {
       const fill = (own && own !== "none" ? own : (el.tagName != "g" && el.parentNode && attr(el.parentNode, name))) || "rgba(0,0,0,1)";
       if (fill.includes("url")) {
         const id = fill.match(/#([^") ]*)/)[1];
-        return F.utils.cssGrad(document.querySelector(`#${id}`));
+        return F.utils.cssGrad(query(`#${id}`));
       }
       return fill;
     }
@@ -1639,8 +1475,8 @@ class F {
       if (typeof s === "string") s = (totalElements * parseInt(s)) / 100;
       if (typeof r === "string") r = (totalElements * parseInt(r)) / 100;
       const step = totalDuration * (g / 100);
-      const segWidth = step / Math.round(totalElements / r);
-      const relIndex = Math.floor((index - s) / r);
-      return [Math.ceil(delay + segWidth * relIndex), Math.ceil(step - segWidth)];
+      const segWidth = step / MATH.round(totalElements / r);
+      const relIndex = MATH.floor((index - s) / r);
+      return [MATH.ceil(delay + segWidth * relIndex), MATH.ceil(step - segWidth)];
     }
 }
