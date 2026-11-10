@@ -635,7 +635,7 @@ class PathMorpher {
 
 class PathReshaper {
   constructor() {
-    this.commandsRegex = /([MC])([^MC]+)/gi;
+    this.commandsRegex = /([MC])([^MCZ]+)/gi; // a closing Z is not part of the last curve's numbers
     this._sampler = document.createElementNS("http://www.w3.org/2000/svg", "path");
   }
 
@@ -720,8 +720,11 @@ class PathReshaper {
 
   getPtRelIdx(h, p1, p2) {
     const sp = this._sampler.shapePoints;
-    const find = p => sp.findIndex(s => s.x === p.x && s.y === p.y);
-    return (find(h) - find(p1)) / (find(p2) - find(p1));
+    // The nearest sample from index f on: exact floats missed the curve's end (the samples stop just short of
+    // t = 1), and a closed path's end is also its start (index 0): the split point landed far off the curve
+    const find = (p, f = 0) => { let b = f; for (let i = f; i < sp.length; i++) if ((sp[i].x - p.x) ** 2 + (sp[i].y - p.y) ** 2 < (sp[b].x - p.x) ** 2 + (sp[b].y - p.y) ** 2) b = i; return b; };
+    const s = find(p1);
+    return (find(h, s) - s) / (find(p2, s + 1) - s);
   }
 
   splitBez(s, cp1, cp2, e, t = 0.5) {
@@ -1316,7 +1319,7 @@ class F {
         }
       }
     } else if (prop === "mo" || prop === "d") {
-      val = tween.runner.interpolator(localProgress);
+      val = tween.runner.interpolator(tween.runner._stepper.ease(localProgress)); // the keyframe's easing (it ran linearly)
       attr(el, "d", val);
     }else if (prop == "fp") {
         const pathLength = tween.runner.followPathLength;

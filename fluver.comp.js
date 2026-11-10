@@ -277,7 +277,7 @@ return path + `C${(prev[0] * 2 + p[0]) / 3},${(prev[1] * 2 + p[1]) / 3} ${(prev[
 }
 }class PathReshaper {
 constructor() {
-this.commandsRegex = /([MC])([^MC]+)/gi;
+this.commandsRegex = /([MC])([^MCZ]+)/gi; // a closing Z is not part of the last curve's numbers
 this._sampler = document.createElementNS("http://www.w3.org/2000/svg", "path");
 }
 _smplPath(d) {
@@ -347,8 +347,11 @@ return points;
 }
 getPtRelIdx(h, p1, p2) {
 const sp = this._sampler.shapePoints;
-const find = p => sp.findIndex(s => s.x === p.x && s.y === p.y);
-return (find(h) - find(p1)) / (find(p2) - find(p1));
+// The nearest sample from index f on: exact floats missed the curve's end (the samples stop just short of
+// t = 1), and a closed path's end is also its start (index 0): the split point landed far off the curve
+const find = (p, f = 0) => { let b = f; for (let i = f; i < sp.length; i++) if ((sp[i].x - p.x) ** 2 + (sp[i].y - p.y) ** 2 < (sp[b].x - p.x) ** 2 + (sp[b].y - p.y) ** 2) b = i; return b; };
+const s = find(p1);
+return (find(h, s) - s) / (find(p2, s + 1) - s);
 }
 splitBez(s, cp1, cp2, e, t = 0.5) {
 const B0 = [(1-t)*s.x+t*cp1.x, (1-t)*s.y+t*cp1.y];
@@ -645,7 +648,7 @@ const v = ghost._transalterersStates[p];
 if (v && !has(p)) p == "sx" ? T.sx(v, 1) : p == "sy" ? T.sx(1, v) : T[p](v);
 }
 } else if (prop == "mo" || prop == "d") {
-attr(el, "d", runner.interpolator(pr));
+attr(el, "d", runner.interpolator(runner.ease(pr))); // the keyframe's easing (it ran linearly)
 } else if (prop == "fp") {
 const { followPathLength: L, followPathStart: s, followPathEnd: e, lutData, followedPath, p: { cd, rd } } = runner;
 const progress = runner.followPathLinear ? s + (e - s) * pr : L > 0 ? val / L : s, S = t => sampleLUT(lutData, t);
