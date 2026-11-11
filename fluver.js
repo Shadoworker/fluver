@@ -796,6 +796,13 @@ class F {
       return [rep(from), rep(to)];
     },
     // The length of one dash list (dash + gap + ...)
+    // The list written: rounded, >= 0, and in its shortest form that draws the same (SVG repeats a dash list):
+    // "5 5 5 5" -> "5", "20 10 20 10" -> "20 10", as the editor
+    dashString(v) {
+      const a = [...v].map(n => +MATH.max(0, n).toFixed(2));
+      const p = a.findIndex((_, i) => i && a.length % i == 0 && a.every((n, j) => n == a[j % i]));
+      return (p > 0 ? a.slice(0, p) : a).join(" ");
+    },
     dashPeriod(v) {
       return (F.utils.dashList(v) || [0]).reduce((s, n) => s + n, 0);
     },
@@ -1236,7 +1243,8 @@ class F {
   _render(elapsed) {
     const elapsedTweens = this._elapsed(elapsed);
     for (const tween of elapsedTweens) {
-      let localProgress = MATH.max(0, MATH.min(1, (elapsed - tween.delay) / (tween.duration || 1)));
+      // A tween of no length (a single keyframe) is at its end once reached, as the editor (it drew the start value)
+      let localProgress = tween.duration > 0 ? MATH.max(0, MATH.min(1, (elapsed - tween.delay) / tween.duration)) : +(elapsed >= tween.delay);
       this._animate(tween, elapsedTweens, localProgress);
     }
   }
@@ -1370,7 +1378,7 @@ class F {
       if (prop in F.__STROKE) {
         const p = prop;
         prop = F.__STROKE[prop];
-        if (p === "da") val = val.map(n => +MATH.max(0, n).toFixed(2)).join(" ");
+        if (p === "da") val = F.utils.dashString(val);
         // With its own dash-array animation, the offset moves the dash list (100% = its length)
         if (p === "do" && this._elHasProps(el, ["da"])) val = F.utils.dashPeriod(attr(el, "stroke-dasharray")) * (val / 100);
         else if (p === "do") {
