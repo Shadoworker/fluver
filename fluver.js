@@ -951,6 +951,15 @@ class F {
       return arr;
     },
     // rgb(a) or hex. Alpha is a fraction (parseInt made 0.5 -> 0, and rgb() -> NaN)
+    // A tween from / to "none": that end is the other end's color(s), fully transparent (it fades, as the editor)
+    noneAsTransparent(from, to) {
+      const none = c => c == null || String(c).trim() == "none";
+      const clear = c => F.utils.isGradient(c)
+        ? String(c).replace(/rgba?\(([^,()]+),([^,()]+),([^,()]+)(?:,[^()]*)?\)/g, "rgba($1,$2,$3,0)")
+        : rgba([...F.utils.rgbaToArr(c).slice(0, 3), 0]);
+      if (none(from) && none(to)) return ["rgba(0,0,0,0)", "rgba(0,0,0,0)"];
+      return [none(from) ? clear(to) : from, none(to) ? clear(from) : to];
+    },
     rgbaToArr(color) {
       color = String(color || "").trim();
       if (color[0] === "#") {
@@ -1093,6 +1102,9 @@ class F {
           } else if (prop in F.__COLORS) {
 
             const finalValueTmp = finalValue;
+            // "none" (no color): the other end's color made transparent; ending on it writes "none"
+            const toNone = String(finalValue).trim() == "none";
+            [startValue, finalValue] = F.utils.noneAsTransparent(startValue, finalValue);
             if (F.utils.isGradient(finalValue)) {
               runner = new Morphable();
               const formatted = F.utils.fmtGrad(startValue, finalValue);
@@ -1105,6 +1117,7 @@ class F {
               runner.from(F.utils.rgbaToArr(startValue));
               finalValue = F.utils.rgbaToArr(finalValue);
             }
+            runner.toNone = toNone;
 
             startValue = finalValueTmp;
 
@@ -1334,7 +1347,9 @@ class F {
         }
       }
      else if (prop in F.__COLORS) {
-      if (tween.runner.gradientType) {
+      // Ended on "none" (no color): written as such, not as a transparent color
+      if (tween.runner.toNone && localProgress >= 1) attr(el, prop === "f" ? "fill" : "stroke", "none");
+      else if (tween.runner.gradientType) {
         const gd = F.utils.parseGradArr(val);
         F.utils.setGradEl(el, ghost, prop, tween.runner.gradientType, gd.angle, gd.stops);
       } else {
