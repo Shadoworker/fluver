@@ -798,6 +798,32 @@ class F {
   }
 
   static utils = {
+    // Dash lists, as the editor (fluv.js): "10 5" / [10, 5] -> 4 numbers >= 0 (dash, gap, dash, gap),
+    // 6 for an imported 3-value list, or null when solid ("none", "0", empty)
+    dashList(v) {
+      const a = (isArray(v) ? [...v] : String(v ?? "").trim().split(delimiter)).map(num).filter(n => isFinite(n) && n >= 0);
+      if (!a.some(n => n > 0)) return null;
+      if (a.length === 1) return [a[0], a[0], a[0], a[0]];
+      if (a.length === 2) return [...a, ...a];
+      if (a.length === 3) return [...a, ...a]; // imported only: SVG doubles it (6 values)
+      return a.slice(0, 4);
+    },
+    // Two lists of the same length that look as they should at both ends: solid = each dash as long as its
+    // dash + gap (the gaps open from 0), repeated (not padded) to a common length so the pattern doesn't change
+    matchDashes(from, to) {
+      const solidLike = a => a.map((n, i) => (i % 2 ? 0 : n + a[i + 1]));
+      if (!from && !to) return [[0], [0]];
+      from = from || solidLike(to);
+      to = to || solidLike(from);
+      const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+      const len = (from.length * to.length) / gcd(from.length, to.length);
+      const rep = a => Array.from({ length: len }, (_, i) => a[i % a.length]);
+      return [rep(from), rep(to)];
+    },
+    // The length of one dash list (dash + gap + ...)
+    dashPeriod(v) {
+      return (F.utils.dashList(v) || [0]).reduce((s, n) => s + n, 0);
+    },
     // An element's design skew, from its "skew" attribute ("x pivotY [y pivotX]"): { x, y, px, py }
     skewOf(el) { const [x, py, y, px] = String(attr(el, "skew") ?? "").trim().split(/[\s,]+/).map(Number), n = v => isFinite(v) ? v : 0; return { x: n(x), y: n(y), px: n(px), py: n(py) }; },
     // The matrix without its innermost (local) skew: skewY then skewX around (px, py)
@@ -1079,7 +1105,8 @@ class F {
 
           if (prop === "sk" || prop === "sky") startValue = value; // a plain angle, applied inside the matrix (skTransformer)
           else if (F.__TRANSFORMS.includes(prop)) {
-            let val = value - startValue.dec()[prop];
+            // (for an anchor startValue is the previous [x, y] key, not a matrix: val isn't used there)
+            let val = value - (startValue.dec?.() || startValue)[prop];
             if (prop === "tx" || prop === "ty") {
               const dx = prop === "tx" ? val : 0, dy = prop === "ty" ? val : 0;
               finalValue = startValue.clone().transform({ translate: [dx, dy] }, true);
@@ -1113,11 +1140,8 @@ class F {
 
           } else if (prop === "da") {
             runner = new Morphable();
-            const diff = finalValue.length - startValue.length;
-            if (diff > 0) startValue = [...startValue, ...new Array(diff).fill(startValue.at(-1))];
-            else finalValue = [...finalValue, ...new Array(MATH.abs(diff)).fill(finalValue.at(-1))];
-            startValue = startValue.map(e => parseInt(e));
-            finalValue = finalValue.map(e => parseInt(e));
+            // Same number of items, same look at both ends; decimals kept, "none" handled as solid
+            [startValue, finalValue] = F.utils.matchDashes(F.utils.dashList(startValue), F.utils.dashList(finalValue));
             runner.from(startValue);
           } else if (prop === "mo") {
             const toPathSelector = finalValue;
@@ -1385,8 +1409,10 @@ class F {
       if (prop in F.__STROKE) {
         const p = prop;
         prop = F.__STROKE[prop];
-        if (p === "da") val = val.join(" ").trim();
-        if (p === "do") {
+        if (p === "da") val = val.map(n => +MATH.max(0, n).toFixed(2)).join(" ");
+        // With its own dash-array animation, the offset moves the dash list (100% = its length)
+        if (p === "do" && this._elHasProps(el, ["da"])) val = F.utils.dashPeriod(attr(el, "stroke-dasharray")) * (val / 100);
+        else if (p === "do") {
           let dashoffsetLen = tween.runner.dashoffsetLen;
           const targetSizeChanged = this._elHasProps(el, [...F.__SIZES, ...F.__SCALES]);
           if (targetSizeChanged) dashoffsetLen = F.utils.getTotLen(el);
@@ -1463,6 +1489,8 @@ class F {
     if (prop === "fp") return 0;
     if (prop in F.__PATHS) return attr(el, "d");
     if (prop in F.__EFFECTS) return null;
+    // the element's own dash list, raw ("none" when unset): F.utils.dashList reads it (an attribute "da" never exists)
+    if (prop === "da") return attr(el, "stroke-dasharray") || "none";
     if (prop === "rd") return attr(el, "rx") || 0;
     if (prop === "mb") {
       const mask = attr(el.tagName != "g" ? el.parentNode : el, "mask") || "";
@@ -1474,7 +1502,8 @@ class F {
 
   _reorder(obj) {
     const result = {};
-    [F.__PATHS.fp,...F.__TRANSFORMS, ...F.__SIZES].forEach(key => { if (key in obj) result[key] = obj[key]; });
+    // da before do (it reads the dash list)
+    [F.__PATHS.fp,...F.__TRANSFORMS, ...F.__SIZES, "da"].forEach(key => { if (key in obj) result[key] = obj[key]; });
     Object.keys(obj).forEach(key => { if (!(key in result)) result[key] = obj[key]; });
     return result;
   }
