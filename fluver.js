@@ -731,6 +731,8 @@ class PathReshaper {
     const { added, insertIndex, prevInsertIndex, nextInsertIndex } = diff;
     const start = pointsToKeep[prevInsertIndex], end = pointsToKeep[nextInsertIndex];
     const start_ = pointsToReshape[prevInsertIndex], end_ = pointsToReshape[insertIndex];
+    // The added point is the first or the last one: no segment to split around it, the morph samples the paths
+    if (!start || !end || !start_ || !end_) return { 0: path1, 1: path2 };
 
     this._smplPath(pathToKeep);
     const relIdx = this.getPtRelIdx(added, start, end);
@@ -1062,7 +1064,7 @@ class F {
         let startValue = this._initState(el, prop, ghost);
         // Rotation and scales read from the matrix without its skew (a skew Y tilts its x basis)
         if ((prop === "ro" || prop === "sx" || prop === "sy") && ghost._skew.y) startValue = F.utils.unskew(startValue, ghost._skew);
-        let startAnchor = ghost._anchor;
+        let startAnchor = ghost._anchor, startRo = null; // ro: the previous key's angle
         const steps = data[prop];
 
         steps?.forEach((step, j) => {
@@ -1095,6 +1097,9 @@ class F {
               else {
                 if (prop === "sx" || prop === "sy") val = value / startValue.dec()[prop];
                 finalValue = startValue.clone().transform({ [prop]: val }, true);
+                // Rotation tweens its angle, as the editor: matrices blended entry by entry turned 0 -> 180 into a
+                // jump, 360 into nothing. From the start pose's angle, then each key's
+                if (prop === "ro") { runner = new Morphable(); runner.from(startRo ?? startValue.dec().ro); runner.toRo = Number(value) || 0; startRo = runner.toRo; }
               }
               ghost._transalterersStates[prop] = value;
             }
@@ -1186,6 +1191,7 @@ class F {
           }
 
           if (prop === "an") runner.to(value);
+          else if (prop === "ro") runner.to(runner.toRo);
           else runner.to(finalValue);
 
           runner.staggered = isArray(g) ? g : false;
@@ -1308,7 +1314,7 @@ class F {
       else if (prop === "ty") tyTransformer(val.dec().ty);
       else if (prop === "an") anchorTransform(val);
       else if (F.__SCALES.includes(prop)) scaleTransformer(val.dec().sx, val.dec().sy);
-      else if (prop === "ro") roTransformer(val.dec().ro);
+      else if (prop === "ro") roTransformer(Number(val) || 0); // the tweened angle
       else if (prop === "sk" || prop === "sky") skTransformer(prop === "sk" ? "x" : "y", Number(val?.value ?? val) || 0);
 
       const transformers = { ty: tyTransformer, an: anchorTransform, sx: scaleTransformer, sy: scaleTransformer, ro: roTransformer };
