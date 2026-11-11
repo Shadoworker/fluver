@@ -384,32 +384,7 @@ const arrToStr = a => {
   return s + ' ';
 };
 
-const movingUtility = {
-  el: null,
-  move(el, x, y) {
-    this.el = el;
-    const type = attr(el, 'id').split('-')[1];
-    return type === 'path' ? this.movePath(x, y) : '';
-  },
-  movePath(x, y) {
-    const box = this.el.getBBox();
-    x -= box.x + box.width * 0.5;
-    y -= box.y + box.height * 0.5;
-    const pathArray = pPath(attr(this.el, 'd'));
-    if (!isNaN(x) && !isNaN(y)) {
-      for (let l, i = pathArray.length - 1; i >= 0; i--) {
-        l = pathArray[i][0];
-        if (l === 'M') { pathArray[i][1] += x; pathArray[i][2] += y; }
-        else if (l === 'C') {
-          pathArray[i][1] += x; pathArray[i][2] += y;
-          pathArray[i][3] += x; pathArray[i][4] += y;
-          pathArray[i][5] += x; pathArray[i][6] += y;
-        } 
-      }
-    }
-    return arrToStr(pathArray);
-  }
-};
+
 
 const sizingUtility = {
   el: null, width: null, height: null,
@@ -560,7 +535,7 @@ class PathMorpher {
   }
   // Two paths of the same curves (one M, then only C, a closing Z allowed) morph curve by curve, as in
   // the editor (fluv.js createPathMorph): a closed one from the target's nearest starting curve
-  sameMorph(d1, d2) {
+  sameMorph(d1, d2, dx, dy) {
     const nums = (d) => (d.match(/[+-]?\d*\.?\d+(?:e[+-]?\d+)?/gi) || []).map(Number);
     // Closed: a Z, or a last point back on M
     const closed = (d) => { const n = nums(d); return /z\s*$/i.test(d) || (Math.abs(n[n.length - 2] - n[0]) < 1e-6 && Math.abs(n[n.length - 1] - n[1]) < 1e-6); };
@@ -578,7 +553,7 @@ class PathMorpher {
       if (!closed(d) || (Math.abs(lx - n[0]) < 1e-6 && Math.abs(ly - n[1]) < 1e-6)) return n;
       return [...n, lx + (n[0] - lx) / 3, ly + (n[1] - ly) / 3, lx + (2 * (n[0] - lx)) / 3, ly + (2 * (n[1] - ly)) / 3, n[0], n[1]];
     };
-    const a = full(d1), b = full(d2);
+    const a = full(d1), b = full(d2).map((n, i) => n + (i % 2 ? dy : dx)); // the target moved by (dx, dy)
     if (a.length != b.length) return null;
     const count = (b.length - 2) / 6, ends = (n) => Array.from({ length: count }, (_, i) => [n[6 + i * 6], n[7 + i * 6]]);
     const shift = closed(d1) ? this.bestShift(ends(a), ends(b)) : 0;
@@ -603,11 +578,12 @@ class PathMorpher {
     return best;
   }
   // 3. Generate the actual animation function
-  mkMorph(d1, d2) {
-    const same = this.sameMorph(d1, d2);
+  // (dx, dy): the target moved (morph to shape: in place, see add)
+  mkMorph(d1, d2, dx = 0, dy = 0) {
+    const same = this.sameMorph(d1, d2, dx, dy);
     if (same) return same;
     const p1 = this.sample(d1);
-    const p2 = this.align(p1, this.sample(d2));
+    const p2 = this.align(p1, this.sample(d2).map(p => [p[0] + dx, p[1] + dy]));
     // Both closed: the morph is closed too (the alignment leaves the last sample one step short of the
     // first: an open path there showed a notch in the stroke)
     const closed = (d) => { const n = (d.match(/[+-]?\d*\.?\d+(?:e[+-]?\d+)?/gi) || []).map(Number); return /z\s*$/i.test(d) || (Math.abs(n[n.length - 2] - n[0]) < 1e-6 && Math.abs(n[n.length - 1] - n[1]) < 1e-6); };
@@ -773,7 +749,6 @@ class PathReshaper {
 }
 
 const pathMorpherIns = new PathMorpher();
-const _imgCache = new Map();
 
 class F {
   static __TRANSFORMS = ["tx","ty","an","sx","sy","ro","sk","sky"];
@@ -1008,23 +983,11 @@ class F {
       el.ownerSVGElement.querySelector("defs").appendChild(g);
       attr(el, baseColorType === "f" ? "fill" : "stroke", `url(#${id})`);
     },
-    getImageNaturalSize(href) {
-      if (_imgCache.has(href)) return Promise.resolve(_imgCache.get(href));
-      return new Promise(resolve => {
-        const img = new window.Image();
-        img.onload = () => {
-          const size = { w: img.naturalWidth, h: img.naturalHeight };
-          _imgCache.set(href, size);
-          resolve(size);
-        };
-        img.src = href;
-      });
-    },
-    // An image element's pattern, fitted to cover it. The player passes the element's size; without one
-    // (a size animated through 0) the image's own size is loaded
-    async updateImg(el, iw = null, ih = null) {
+    // An image element's pattern, fitted to cover it, from the element's size (the player passes it). Without one
+    // there is nothing to fit: Pofton never writes an exact 0 (sizes are kept >= 1e-5)
+    updateImg(el, iw = null, ih = null) {
+      if (!iw || !ih) return;
       const pattern = query(`#${attr(el, 'id')}-p-bg`), img = pattern.firstChild;
-      if (!iw || !ih) ({ w: iw, h: ih } = await this.getImageNaturalSize(attr(img, "href") || attr(img, "xlink:href")));
       const x = num(attr(el, 'x')), y = num(attr(el, 'y')), { width: w, height: h } = el.getBBox();
       const k = iw > ih ? h / ih : w / iw;
       [[pattern, { width: iw, height: ih, x: x + (w - iw * k) / 2, y: y + (h - ih * k) / 2 }], [img, { width: iw, height: ih, transform: `scale(${k})` }]]
@@ -1149,14 +1112,12 @@ class F {
             const toPathEl = query(toPathSelector);
             if (!toPathEl) return;
             runner.fromPath = { d: fromPath };
-            runner.toPath = { d: attr(toPathEl, "d") };
-            let destClone = toPathEl.cloneNode();
-            toPathEl.pathString = attr(toPathEl, "d");
-            destClone.pathString = toPathEl.pathString;
-            const sbox = el.getBBox();
-            movingUtility.move(destClone, sbox.x + sbox.width * 0.5, sbox.y + sbox.height * 0.5);
-            runner.toPath.d = attr(destClone, "d");
-            runner.interpolator = pathMorpherIns.mkMorph(runner.fromPath.d, runner.toPath.d);
+            // In place, as the editor: the target's centre on the element's (it was meant to be: the move
+            // was made on a detached clone, which has no box, and its result was never used)
+            const sb = el.getBBox(), tb = toPathEl.getBBox();
+            const dx = sb.x + sb.width / 2 - tb.x - tb.width / 2, dy = sb.y + sb.height / 2 - tb.y - tb.height / 2;
+            runner.interpolator = pathMorpherIns.mkMorph(runner.fromPath.d, attr(toPathEl, "d"), dx, dy);
+            runner.toPath = { d: runner.interpolator(1) }; // the end shape as drawn: the next key starts from it
             finalValue = runner.toPath.d;
           } else if (prop === "d") {
             startValue = isArray(startValue) ? startValue.toString() : startValue;
