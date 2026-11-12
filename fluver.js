@@ -837,16 +837,18 @@ class F {
       const ctm = this.ctmOf(pathNode);
       const totalLen = this.getTotLen(pathNode);
 
-      const lut = Array.from({ length: samples + 1 }, (_, i) => {
+      // Points in the path's own space, placed with its current matrix each frame (followVal): the file's drawn
+      // size can change after the start (a reload before layout, a resized frame). Distances along it as drawn.
+      const lut = Array.from({ length: samples + 1 }, (_, i) => pathNode.getPointAtLength((i / samples) * totalLen));
+      const drawn = lut.map((p) => {
         const sp = svgRoot.createSVGPoint();
-        const local = pathNode.getPointAtLength((i / samples) * totalLen);
-        sp.x = local.x; sp.y = local.y;
+        sp.x = p.x; sp.y = p.y;
         return sp.matrixTransform(ctm);
       });
 
-      const arcLengths = lut.reduce((acc, p, i) => {
+      const arcLengths = drawn.reduce((acc, p, i) => {
         if (i === 0) return [0];
-        const dx = p.x - lut[i-1].x, dy = p.y - lut[i-1].y;
+        const dx = p.x - drawn[i-1].x, dy = p.y - drawn[i-1].y;
         return [...acc, acc[i-1] + MATH.sqrt(dx*dx + dy*dy)];
       }, []);
 
@@ -873,12 +875,15 @@ class F {
       const {cd, rd} = runner.p;
 
       const svgRoot = path.ownerSVGElement;
+      // The path's points placed with its current matrix (see buildLUT)
+      const m = this.ctmOf(path);
+      const place = (q) => { const sp = svgRoot.createSVGPoint(); sp.x = q.x; sp.y = q.y; return sp.matrixTransform(m); };
       // Sample two adjacent points in screen space for tangent
       const STEP = 0.001;
-      const p0 = this.sampleLUT(runner.lutData, progress - STEP);
-      const p1 = this.sampleLUT(runner.lutData, progress + STEP);
+      const p0 = place(this.sampleLUT(runner.lutData, progress - STEP));
+      const p1 = place(this.sampleLUT(runner.lutData, progress + STEP));
       // Current point
-      const screenPt = this.sampleLUT(runner.lutData, progress);
+      const screenPt = place(this.sampleLUT(runner.lutData, progress));
 
       // Angle in screen space
       let angle = MATH.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / MATH.PI;
