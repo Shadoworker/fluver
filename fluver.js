@@ -1097,9 +1097,10 @@ class F {
               else {
                 if (prop === "sx" || prop === "sy") val = value / startValue.dec()[prop];
                 finalValue = startValue.clone().transform({ [prop]: val }, true);
-                // Rotation tweens its angle, as the editor: matrices blended entry by entry turned 0 -> 180 into a
-                // jump, 360 into nothing. From the start pose's angle, then each key's
-                if (prop === "ro") { runner = new Morphable(); runner.from(startRo ?? startValue.dec().ro); runner.toRo = Number(value) || 0; startRo = runner.toRo; }
+                // Rotation and scales tween their value, as the editor: matrices blended entry by entry turned 0 -> 180
+                // into a jump, 360 into nothing, and scaled a rotated element on the screen axes. From the start pose's
+                // value, then each key's
+                if (prop === "ro" || prop === "sx" || prop === "sy") { runner = new Morphable(); runner.from(startRo ?? startValue.dec()[prop]); runner.toRo = Number(value) || 0; startRo = runner.toRo; }
               }
               ghost._transalterersStates[prop] = value;
             }
@@ -1191,7 +1192,7 @@ class F {
           }
 
           if (prop === "an") runner.to(value);
-          else if (prop === "ro") runner.to(runner.toRo);
+          else if (prop === "ro" || prop === "sx" || prop === "sy") runner.to(runner.toRo);
           else runner.to(finalValue);
 
           runner.staggered = isArray(g) ? g : false;
@@ -1294,9 +1295,16 @@ class F {
         transform(trSrc, { ro: v - F.utils.rotOf(trSrc), ox, oy }, true, true);
         transEl()
       };
-      const scaleTransformer = (tsX, tsY) => {
-        transform(trSrc, { scale: [tsX, tsY], ox, oy }, true, true);
-        transEl()
+      // One axis' scale (absolute), on the element's own axes: inside its rotation, outside its skew, about the anchor
+      const scaleTransformer = (p, v) => {
+        const k = trSrc._sk, sk = k && (k.x || k.y);
+        const m = sk ? F.utils.unskew(new Matrix(trSrc), k) : new Matrix(trSrc);
+        const K = sk ? F.utils.reskew(new Matrix(), { x: 0, y: 0, px: 0, py: 0 }, k) : new Matrix();
+        const r = v / m.dec()[p];
+        if (!isFinite(r)) return;
+        const kx = p === "sx" ? r : 1, ky = p === "sy" ? r : 1, px = K.a * ox + K.c * oy + K.e, py = K.b * ox + K.d * oy + K.f;
+        attr(trSrc, "transform", m.mulO(new Matrix(kx, 0, 0, ky, px * (1 - kx), py * (1 - ky))).mulO(K));
+        transEl();
       };
       const anchorTransform = v => { ghost._anchor = v; };
       // Skew sits inside the matrix: this frame's starts from the design one (with its skew), unless a follow path
@@ -1313,7 +1321,7 @@ class F {
       if (prop === "tx" && !this._hasTween(elapsedTweens, el, "fp")) { transform(el, val, false, true); transform(ghost, val, false, true); el._sk = ghost._sk = ghost._skew; }
       else if (prop === "ty") tyTransformer(val.dec().ty);
       else if (prop === "an") anchorTransform(val);
-      else if (F.__SCALES.includes(prop)) scaleTransformer(val.dec().sx, val.dec().sy);
+      else if (F.__SCALES.includes(prop)) scaleTransformer(prop, Number(val)); // the tweened scale
       else if (prop === "ro") roTransformer(Number(val) || 0); // the tweened angle
       else if (prop === "sk" || prop === "sky") skTransformer(prop === "sk" ? "x" : "y", Number(val?.value ?? val) || 0);
 
@@ -1324,8 +1332,7 @@ class F {
           if (!this._hasTween(elapsedTweens, el, p)) {
             const v = ghost._transalterersStates[p];
             if (v) {
-              F.__SCALES.includes(p) ? p === "sx" ? transformer(v, 1) : transformer(1, v)
-              : transformer(v);
+              F.__SCALES.includes(p) ? transformer(p, v) : transformer(v);
             }
           }
         }
