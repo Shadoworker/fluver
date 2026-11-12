@@ -1440,7 +1440,10 @@ class F {
 
     let startTime = null;
     const initialElapsed = this.lastElapsed;
-    const tick = now => {
+    // The clock, not the frame's timestamp: a reload with the player cached gave the first frame a stale one
+    // (about a second old) and the whole animation played in one frame
+    const tick = () => {
+      const now = performance.now();
       if (!startTime) startTime = now;
       const elapsed = initialElapsed + (now - startTime);
 
