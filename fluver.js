@@ -135,8 +135,16 @@ function propSize(element, width, height, box) {
 
 // Progress is always within 0-1 here (the player clamps it)
 const easing = {
+  // The CSS cubic-bezier: the curve's x solved for t (bisection), then its y. y alone, taken at t,
+  // made every curve another one ("linear", 0 0 1 1, played as 3t² - 2t³: eased in and out)
   bezier(x1, y1, x2, y2) {
-    return t => 3 * t * (1 - t) ** 2 * y1 + 3 * t ** 2 * (1 - t) * y2 + t ** 3;
+    const at = (a, b, s) => 3 * s * (1 - s) ** 2 * a + 3 * s ** 2 * (1 - s) * b + s ** 3;
+    return t => {
+      if (t <= 0 || t >= 1) return t <= 0 ? 0 : 1;
+      let lo = 0, hi = 1, s = t;
+      for (let i = 0; i < 24; i++) { s = (lo + hi) / 2; if (at(x1, x2, s) < t) lo = s; else hi = s; }
+      return at(y1, y2, s);
+    };
   },
   // Jumps at the end of each step (the only kind exports use)
   steps(steps) {
